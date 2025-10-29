@@ -1,0 +1,13 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Reports
+result/
+
+# Logs
+*.log
+
+# Test data
+urls-full.txt
+sitemap.xml

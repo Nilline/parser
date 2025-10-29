@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Coursebox Site Comparison Parser</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🔍 Site Comparison Parser</h1>
+      <p class="subtitle">Compare Production vs Development sites for migration validation</p>
+    </header>
+
+    <main>
+      <section class="config-section">
+        <h2>Configuration</h2>
+
+        <div class="form-group">
+          <label for="prodUrl">Production URL</label>
+          <input
+            type="text"
+            id="prodUrl"
+            placeholder="https://www.coursebox.ai"
+            value="https://www.coursebox.ai"
+          >
+        </div>
+
+        <div class="form-group">
+          <label for="devUrl">Development URL</label>
+          <input
+            type="text"
+            id="devUrl"
+            placeholder="https://coursebox-ai.vercel.app"
+            value="https://coursebox-ai.vercel.app"
+          >
+        </div>
+
+        <div class="form-group">
+          <label>Elements to Compare</label>
+          <div class="checkbox-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="checkStatus" checked disabled>
+              <span>URL Status (required)</span>
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="checkTitle" checked>
+              <span>Title Tags</span>
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="checkDescription" checked>
+              <span>Meta Descriptions</span>
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="checkH1" checked>
+              <span>H1 Headings</span>
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="checkOgImage" checked>
+              <span>OG Images</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="button-group">
+          <button id="startButton" class="btn-primary">Start Comparison</button>
+          <button id="stopButton" class="btn-danger" style="display: none;">Stop Parser</button>
+        </div>
+      </section>
+
+      <section class="urls-section">
+        <h2>URL List</h2>
+        <p class="subtitle-small">Edit the list of URLs to compare. One URL per line. Lines starting with # are ignored.</p>
+
+        <div class="urls-stats">
+          <span id="urlCount">0 URLs</span>
+          <button id="saveUrlsButton" class="btn-small">Save Changes</button>
+        </div>
+
+        <textarea id="urlsEditor" placeholder="Enter URLs, one per line...
+Example:
+/
+/about
+/pricing
+# This is a comment"></textarea>
+      </section>
+
+      <section class="progress-section" id="progressSection" style="display: none;">
+        <h2>Progress</h2>
+        <div class="progress-bar">
+          <div class="progress-fill" id="progressFill"></div>
+          <span class="progress-text" id="progressText">0%</span>
+        </div>
+        <div class="progress-log" id="progressLog"></div>
+      </section>
+
+      <section class="results-section" id="resultsSection" style="display: none;">
+        <h2>Results</h2>
+
+        <div class="summary-grid" id="summaryGrid"></div>
+
+        <div class="report-links">
+          <a href="#" id="htmlReportLink" class="btn-secondary" target="_blank">
+            📄 View HTML Report
+          </a>
+          <a href="#" id="csvReportLink" class="btn-secondary" download>
+            📊 Download CSV Report
+          </a>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <p>Coursebox Parser v1.0 | <span id="status">Disconnected</span></p>
+    </footer>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
