@@ -80,7 +80,7 @@ function handleProgress(data) {
 
     case 'complete':
       addLogEntry(message, 'success');
-      displayResults(summary);
+      displayResults(summary, new Date());
       isRunning = false;
       startButton.disabled = false;
       startButton.textContent = 'Start Comparison';
@@ -118,8 +118,10 @@ function addLogEntry(message, type = 'info') {
   progressLog.scrollTop = progressLog.scrollHeight;
 }
 
-function displayResults(summary) {
+function displayResults(summary, timestamp) {
   resultsSection.style.display = 'block';
+
+  const timeAgo = timestamp ? formatTimeAgo(timestamp) : '';
 
   summaryGrid.innerHTML = `
     <div class="summary-card success">
@@ -144,8 +146,41 @@ function displayResults(summary) {
     </div>
   `;
 
+  if (timestamp) {
+    summaryGrid.innerHTML += `
+      <div class="summary-card" style="grid-column: 1 / -1;">
+        <h3>🕐 Last Generated</h3>
+        <div class="value" style="font-size: 1.2rem;">${timeAgo}</div>
+        <small>${new Date(timestamp).toLocaleString()}</small>
+      </div>
+    `;
+  }
+
   htmlReportLink.href = `/result/comparison-report.html?t=${Date.now()}`;
   csvReportLink.href = `/result/comparison-report.csv?t=${Date.now()}`;
+}
+
+function formatTimeAgo(timestamp) {
+  const seconds = Math.floor((Date.now() - new Date(timestamp).getTime()) / 1000);
+
+  if (seconds < 60) return `${seconds} seconds ago`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} minutes ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`;
+  return `${Math.floor(seconds / 86400)} days ago`;
+}
+
+async function checkExistingReports() {
+  try {
+    const response = await fetch('/api/reports');
+    const data = await response.json();
+
+    if (data.exists) {
+      const summary = data.summary || { ok: 0, diff: 0, error: 0, total: 0 };
+      displayResults(summary, data.timestamp);
+    }
+  } catch (error) {
+    console.error('Failed to check existing reports:', error);
+  }
 }
 
 startButton.addEventListener('click', async () => {
@@ -311,3 +346,4 @@ async function loadConfig() {
 
 loadConfig();
 loadUrls();
+checkExistingReports();

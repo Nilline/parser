@@ -448,6 +448,15 @@ async function runParser(config, socket) {
       error: results.filter(r => r.status === 'ERROR').length
     };
 
+    const resultDir = path.join(__dirname, 'result');
+    if (!fs.existsSync(resultDir)) {
+      fs.mkdirSync(resultDir, { recursive: true });
+    }
+    fs.writeFileSync(
+      path.join(resultDir, 'summary.json'),
+      JSON.stringify({ summary, timestamp: new Date().toISOString() }, null, 2)
+    );
+
     socket.emit('progress', {
       type: 'complete',
       summary,
@@ -561,6 +570,45 @@ app.post('/api/stop', (req, res) => {
     } else {
       res.json({ success: false, message: 'No active parser found' });
     }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/reports', (req, res) => {
+  try {
+    const resultDir = path.join(__dirname, 'result');
+    const csvPath = path.join(resultDir, 'comparison-report.csv');
+    const htmlPath = path.join(resultDir, 'comparison-report.html');
+    const summaryPath = path.join(resultDir, 'summary.json');
+
+    const csvExists = fs.existsSync(csvPath);
+    const htmlExists = fs.existsSync(htmlPath);
+
+    if (!csvExists && !htmlExists) {
+      return res.json({ exists: false });
+    }
+
+    let timestamp = null;
+    let summary = null;
+
+    if (fs.existsSync(summaryPath)) {
+      const summaryData = JSON.parse(fs.readFileSync(summaryPath, 'utf-8'));
+      summary = summaryData.summary;
+      timestamp = summaryData.timestamp;
+    } else if (csvExists) {
+      const stats = fs.statSync(csvPath);
+      timestamp = stats.mtime;
+    }
+
+    res.json({
+      exists: true,
+      csv: csvExists,
+      html: htmlExists,
+      timestamp: timestamp,
+      summary: summary,
+      age: timestamp ? Math.floor((Date.now() - new Date(timestamp).getTime()) / 1000) : null
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
