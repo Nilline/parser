@@ -147,6 +147,11 @@ function comparePages(prodData, devData, checks) {
 }
 
 async function generateCsvReport(results, checks) {
+  const resultDir = path.join(__dirname, 'result');
+  if (!fs.existsSync(resultDir)) {
+    fs.mkdirSync(resultDir, { recursive: true });
+  }
+
   const headers = [
     { id: 'url', title: 'URL' },
     { id: 'status', title: 'Status' },
@@ -200,6 +205,11 @@ async function generateCsvReport(results, checks) {
 }
 
 function generateHtmlReport(results, prodUrl, devUrl, checks) {
+  const resultDir = path.join(__dirname, 'result');
+  if (!fs.existsSync(resultDir)) {
+    fs.mkdirSync(resultDir, { recursive: true });
+  }
+
   const rows = results.map(r => {
     const statusColor = r.status === 'OK' ? 'green' : r.status === 'DIFF' ? 'orange' : 'red';
     const bgColor = r.status === 'DIFF' ? '#fff3cd' : r.status === 'ERROR' ? '#f8d7da' : '#d4edda';
