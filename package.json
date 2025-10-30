@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "parse": "node parsers/parser.js"
+    "parse": "node parsers/parser.js",
+    "sitemap": "node parsers/sitemap-parser.js"
   },
   "keywords": ["parser", "scraper", "seo", "migration"],
   "author": "Coursebox Team",

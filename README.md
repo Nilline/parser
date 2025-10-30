@@ -66,6 +66,34 @@ The parser will:
 
 **Execution time:** ~4-5 minutes (117 URLs × 1 second delay)
 
+### Sitemap Parser (Get All Pages)
+
+Parse sitemap.xml to extract all unique pages:
+
+```bash
+npm run sitemap
+```
+
+**What it does:**
+- Downloads sitemap.xml from https://www.coursebox.ai/sitemap.xml
+- Filters English pages only (excludes /ar, /fr, etc.)
+- Keeps 1 example per template (e.g., /rto-materials/[slug])
+- Generates 2 files:
+  - `result/webflow-pages.txt` - URL list (for parser)
+  - `result/sitemap-stats.json` - Statistics
+
+**Use cases:**
+- Get complete list of unique Webflow pages
+- Generate URL list for comparison parser
+- Understand site structure and templates
+
+**Execution time:** ~5-10 seconds (parses 500k lines)
+
+**Filtering:**
+- Excludes localized versions (25 languages)
+- Keeps 1 example per template pattern
+- Removes duplicate pages
+
 ## Configuration
 
 ### URLs to Check
@@ -168,15 +196,23 @@ Errors: 5
 ```
 parser/
 ├── server.js              # Express server with Socket.io
-├── parsers/
-│   └── parser.js          # Original CLI parser script
+├── parsers/               # Parser scripts
+│   ├── parser.js          # Comparison parser (CLI)
+│   ├── sitemap-parser.js  # Sitemap.xml parser
+│   └── compare-urls.js    # URL list comparison tool
 ├── public/                # Web UI frontend
 │   ├── index.html         # Main UI page
 │   ├── styles.css         # Minimalist styling
 │   └── app.js             # Socket.io client
+├── data/                  # Data files
+│   ├── sitemap.xml        # Production sitemap
+│   ├── sitemap-dev.xml    # Dev sitemap
+│   └── sitemap-dev-pages.xml
 ├── result/                # Generated reports (gitignored)
 │   ├── comparison-report.csv
-│   └── comparison-report.html
+│   ├── comparison-report.html
+│   ├── webflow-pages.txt  # Sitemap parser output
+│   └── sitemap-stats.json # Sitemap statistics
 ├── urls-main.txt          # List of URLs to check (117 URLs)
 ├── package.json           # npm configuration
 └── README.md              # This file

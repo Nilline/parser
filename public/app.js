@@ -16,6 +16,7 @@ const statusIndicator = document.getElementById('status');
 const urlsEditor = document.getElementById('urlsEditor');
 const urlCount = document.getElementById('urlCount');
 const saveUrlsButton = document.getElementById('saveUrlsButton');
+const parseSitemapButton = document.getElementById('parseSitemapButton');
 
 let isRunning = false;
 
@@ -323,8 +324,49 @@ async function saveUrls() {
   }
 }
 
+async function parseSitemap() {
+  try {
+    parseSitemapButton.disabled = true;
+    parseSitemapButton.textContent = 'Parsing...';
+
+    const response = await fetch('/api/sitemap', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Server error: ${response.status}`);
+    }
+
+    const result = await response.json();
+
+    if (result.success) {
+      // Reload URLs from server
+      await loadUrls();
+      updateUrlCount();
+
+      parseSitemapButton.textContent = `✓ Imported ${result.count} URLs`;
+      setTimeout(() => {
+        parseSitemapButton.textContent = 'Import from Sitemap';
+        parseSitemapButton.disabled = false;
+      }, 3000);
+    } else {
+      throw new Error(result.error || 'Failed to parse sitemap');
+    }
+  } catch (error) {
+    console.error('Sitemap parse error:', error);
+    alert(`Error parsing sitemap: ${error.message}`);
+    parseSitemapButton.textContent = 'Import from Sitemap';
+    parseSitemapButton.disabled = false;
+  }
+}
+
 urlsEditor.addEventListener('input', updateUrlCount);
 saveUrlsButton.addEventListener('click', saveUrls);
+parseSitemapButton.addEventListener('click', parseSitemap);
 
 async function loadConfig() {
   try {

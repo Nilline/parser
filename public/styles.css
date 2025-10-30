@@ -192,6 +192,19 @@ textarea:focus {
   transform: scale(0.98);
 }
 
+.btn-secondary-small {
+  background: var(--secondary);
+}
+
+.btn-secondary-small:hover {
+  background: #475569;
+}
+
+.button-group-inline {
+  display: flex;
+  gap: 0.5rem;
+}
+
 .button-group {
   display: grid;
   grid-template-columns: 1fr 1fr;

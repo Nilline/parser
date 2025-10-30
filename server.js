@@ -614,6 +614,115 @@ app.get('/api/reports', (req, res) => {
   }
 });
 
+// Parse sitemap and update URL list
+app.post('/api/sitemap', async (req, res) => {
+  try {
+    console.log('Starting sitemap parse...');
+
+    const SITEMAP_URL = 'https://www.coursebox.ai/sitemap.xml';
+    const EXCLUDED_LOCALES = ['ar', 'fr', 'de', 'es', 'it', 'pt', 'ru', 'zh', 'ja', 'ko', 'nl', 'pl', 'sv', 'tr', 'he', 'hi', 'th', 'vi', 'id', 'ms', 'fil', 'uk', 'ro', 'cs'];
+    const TEMPLATE_PATTERNS = [
+      { pattern: /^\/rto-materials\/[^\/]+$/, name: '/rto-materials/[slug]' },
+      { pattern: /^\/alternatives\/[^\/]+$/, name: '/alternatives/[slug]' },
+      { pattern: /^\/blog\/[^\/]+$/, name: '/blog/[slug]' },
+      { pattern: /^\/features\/[^\/]+$/, name: '/features/[slug]' },
+      { pattern: /^\/team\/[^\/]+$/, name: '/team/[slug]' }
+    ];
+
+    // Fetch sitemap
+    console.log(`Fetching ${SITEMAP_URL}...`);
+    const response = await axios.get(SITEMAP_URL, {
+      timeout: 60000,
+      headers: {
+        'User-Agent': 'Coursebox-Migration-Parser/1.0'
+      }
+    });
+
+    if (!response.data || typeof response.data !== 'string') {
+      throw new Error('Invalid sitemap response');
+    }
+
+    const xml = response.data;
+    console.log(`Sitemap downloaded (${xml.length} bytes)`);
+
+    // Parse XML
+    const $ = cheerio.load(xml, { xmlMode: true });
+    const urls = [];
+    $('url loc').each((_, element) => {
+      const url = $(element).text().trim();
+      if (url) urls.push(url);
+    });
+
+    console.log(`Found ${urls.length} URLs in sitemap`);
+
+    if (urls.length === 0) {
+      throw new Error('No URLs found in sitemap');
+    }
+
+    // Filter URLs
+    const templateExamples = new Map();
+    const filtered = [];
+
+    for (const url of urls) {
+      const parsed = new URL(url);
+      let pathname = parsed.pathname;
+
+      // Remove trailing slash
+      if (pathname.endsWith('/') && pathname !== '/') {
+        pathname = pathname.slice(0, -1);
+      }
+
+      // Keep /ar as example
+      if (pathname === '/ar') {
+        filtered.push(pathname);
+        continue;
+      }
+
+      // Skip localized
+      const isLocalized = EXCLUDED_LOCALES.some(locale => {
+        return pathname === `/${locale}` || pathname.startsWith(`/${locale}/`);
+      });
+      if (isLocalized) continue;
+
+      // Check template
+      let template = null;
+      for (const { pattern, name } of TEMPLATE_PATTERNS) {
+        if (pattern.test(pathname)) {
+          template = name;
+          break;
+        }
+      }
+
+      if (template) {
+        if (templateExamples.has(template)) continue;
+        templateExamples.set(template, pathname);
+      }
+
+      filtered.push(pathname);
+    }
+
+    console.log(`Filtered to ${filtered.length} unique URLs`);
+
+    // Save to urls-main.txt
+    const urlsPath = path.join(__dirname, 'urls-main.txt');
+    fs.writeFileSync(urlsPath, filtered.join('\n'), 'utf-8');
+    console.log(`Saved to ${urlsPath}`);
+
+    res.json({
+      success: true,
+      count: filtered.length,
+      total: urls.length,
+      templates: templateExamples.size
+    });
+  } catch (error) {
+    console.error('Sitemap parse error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to parse sitemap'
+    });
+  }
+});
+
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
 
@@ -624,6 +733,6 @@ io.on('connection', (socket) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`\n🚀 Coursebox Parser Server running on http://localhost:${PORT}`);
-  console.log(`📊 UI available at http://localhost:${PORT}`);
+  console.log(`\nCoursebox Parser Server running on http://localhost:${PORT}`);
+  console.log(`UI available at http://localhost:${PORT}`);
 });
