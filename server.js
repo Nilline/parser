@@ -95,6 +95,20 @@ async function fetchPageData(baseUrl, path, checks) {
   }
 }
 
+function isExpectedOgImageMigration(prodUrl, devUrl) {
+  if (!prodUrl || !devUrl) return false;
+
+  const prodIsWebflow =
+    prodUrl.includes('cdn.prod.website-files.com') ||
+    prodUrl.includes('uploads.webflow.com') ||
+    prodUrl.includes('assets.website-files.com') ||
+    prodUrl.includes('webflow-prod-assets');
+
+  const devIsSanity = devUrl.includes('cdn.sanity.io');
+
+  return prodIsWebflow && devIsSanity;
+}
+
 function comparePages(prodData, devData, checks) {
   const bothOk = prodData.status === 200 && devData.status === 200;
 
@@ -102,6 +116,9 @@ function comparePages(prodData, devData, checks) {
   const descMatch = !checks.description || prodData.description === devData.description;
   const h1Match = !checks.h1 || prodData.h1 === devData.h1;
   const ogImageMatch = !checks.ogImage || prodData.ogImage === devData.ogImage;
+
+  const ogImageMigration = checks.ogImage && !ogImageMatch &&
+    isExpectedOgImageMigration(prodData.ogImage, devData.ogImage);
 
   let status = 'OK';
   let notes = [];
@@ -115,7 +132,15 @@ function comparePages(prodData, devData, checks) {
     if (checks.title && !titleMatch) { notes.push('Title'); diffCount++; }
     if (checks.description && !descMatch) { notes.push('Description'); diffCount++; }
     if (checks.h1 && !h1Match) { notes.push('H1'); diffCount++; }
-    if (checks.ogImage && !ogImageMatch) { notes.push('OG Image'); diffCount++; }
+
+    if (checks.ogImage && !ogImageMatch) {
+      if (ogImageMigration) {
+        notes.push('OG Image (CDN migration: Webflow→Sanity)');
+      } else {
+        notes.push('OG Image');
+        diffCount++;
+      }
+    }
 
     if (diffCount > 0) {
       status = 'DIFF';
@@ -138,7 +163,8 @@ function comparePages(prodData, devData, checks) {
     h1Match: h1Match ? '✅' : '❌',
     prodOgImage: prodData.ogImage,
     devOgImage: devData.ogImage,
-    ogImageMatch: ogImageMatch ? '✅' : '❌',
+    ogImageMatch: ogImageMatch ? '✅' : (ogImageMigration ? '⚠️' : '❌'),
+    ogImageMigration: ogImageMigration,
     prodStatus: prodData.status,
     devStatus: devData.status,
     prodError: prodData.error || '',
@@ -246,8 +272,8 @@ function generateHtmlReport(results, prodUrl, devUrl, checks) {
     if (checks.ogImage) {
       elementRows.push(`
         <td class="label-cell">OG Image</td>
-        <td class="small-text ${r.ogImageMatch === '❌' ? 'diff-cell' : ''}">${r.prodOgImage || '<em>empty</em>'}</td>
-        <td class="small-text ${r.ogImageMatch === '❌' ? 'diff-cell' : ''}">${r.devOgImage || '<em>empty</em>'}</td>
+        <td class="small-text ${r.ogImageMatch === '❌' && !r.ogImageMigration ? 'diff-cell' : (r.ogImageMigration ? 'migration-cell' : '')}">${r.prodOgImage || '<em>empty</em>'}</td>
+        <td class="small-text ${r.ogImageMatch === '❌' && !r.ogImageMigration ? 'diff-cell' : (r.ogImageMigration ? 'migration-cell' : '')}">${r.devOgImage || '<em>empty</em>'}</td>
         <td style="text-align: center;">${r.ogImageMatch}</td>
       `);
     }
@@ -306,6 +332,7 @@ function generateHtmlReport(results, prodUrl, devUrl, checks) {
     .label-cell { font-weight: bold; }
     .small-text { font-size: 11px; color: #666; }
     .diff-cell { background-color: #ffe6e6 !important; border-left: 3px solid #ff4444 !important; }
+    .migration-cell { background-color: #fff9e6 !important; border-left: 3px solid #ffa500 !important; }
   </style>
 </head>
 <body>
