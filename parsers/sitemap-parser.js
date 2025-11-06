@@ -1,7 +1,8 @@
 /**
  * Sitemap Parser
  *
- * Parses sitemap.xml and extracts unique English pages (1 example per template)
+ * Parses sitemap.xml and extracts all pages (all languages, 1 example per template)
+ * Excludes: /blog/*, /rto-materials/*, /alternatives/* (CSV-generated pages)
  *
  * Usage: node sitemap-parser.js
  */
@@ -16,25 +17,20 @@ const SITEMAP_URL = 'https://www.coursebox.ai/sitemap.xml';
 const OUTPUT_TXT = path.join(__dirname, '..', 'result', 'webflow-pages.txt');
 const OUTPUT_STATS = path.join(__dirname, '..', 'result', 'sitemap-stats.json');
 
-// Locales to exclude (keep only English)
-const EXCLUDED_LOCALES = ['ar', 'fr', 'de', 'es', 'it', 'pt', 'ru', 'zh', 'ja', 'ko', 'nl', 'pl', 'sv', 'tr', 'he', 'hi', 'th', 'vi', 'id', 'ms', 'fil', 'uk', 'ro', 'cs'];
+// Paths to exclude from parsing (CSV-generated pages)
+const EXCLUDED_PATHS = ['/blog/', '/rto-materials/', '/alternatives/'];
 
 // Template patterns (only keep 1 example per template)
 const TEMPLATE_PATTERNS = [
-  { pattern: /^\/rto-materials\/[^\/]+$/, name: '/rto-materials/[slug]' },
-  { pattern: /^\/alternatives\/[^\/]+$/, name: '/alternatives/[slug]' },
-  { pattern: /^\/blog\/[^\/]+$/, name: '/blog/[slug]' },
   { pattern: /^\/features\/[^\/]+$/, name: '/features/[slug]' },
   { pattern: /^\/team\/[^\/]+$/, name: '/team/[slug]' }
 ];
 
 /**
- * Check if URL is a localized version (non-English)
+ * Check if URL should be excluded (blog, RTO materials, alternatives)
  */
-function isLocalizedUrl(pathname) {
-  return EXCLUDED_LOCALES.some(locale => {
-    return pathname === `/${locale}` || pathname.startsWith(`/${locale}/`);
-  });
+function isExcludedPath(pathname) {
+  return EXCLUDED_PATHS.some(excludedPath => pathname.includes(excludedPath));
 }
 
 /**
@@ -93,7 +89,7 @@ function filterUrls(urls) {
   const filtered = [];
   const stats = {
     total: urls.length,
-    localized: 0,
+    excluded: 0,
     duplicateTemplates: 0,
     unique: 0
   };
@@ -107,17 +103,9 @@ function filterUrls(urls) {
       ? pathname.slice(0, -1)
       : pathname;
 
-    // Keep /ar as localization example
-    if (cleanPath === '/ar') {
-      filtered.push(cleanPath);
-      stats.unique++;
-      console.log(`  Localization example: ${cleanPath}`);
-      continue;
-    }
-
-    // Skip other localized
-    if (isLocalizedUrl(cleanPath)) {
-      stats.localized++;
+    // Skip excluded paths (blog, rto-materials)
+    if (isExcludedPath(cleanPath)) {
+      stats.excluded++;
       continue;
     }
 
@@ -140,7 +128,7 @@ function filterUrls(urls) {
   stats.templateExamples = Object.fromEntries(templateExamples);
 
   console.log(`   Total URLs: ${stats.total}`);
-  console.log(`   Localized (excluded): ${stats.localized} (kept /ar as example)`);
+  console.log(`   Excluded (blog, rto-materials, alternatives): ${stats.excluded}`);
   console.log(`   Template duplicates (excluded): ${stats.duplicateTemplates}`);
   console.log(`   Template patterns: ${stats.templates}`);
   console.log(`   Unique URLs saved: ${stats.unique}\n`);

@@ -11,7 +11,8 @@ const progressText = document.getElementById('progressText');
 const progressLog = document.getElementById('progressLog');
 const summaryGrid = document.getElementById('summaryGrid');
 const htmlReportLink = document.getElementById('htmlReportLink');
-const csvReportLink = document.getElementById('csvReportLink');
+const csvReportEnglishLink = document.getElementById('csvReportEnglishLink');
+const csvReportOtherLink = document.getElementById('csvReportOtherLink');
 const statusIndicator = document.getElementById('status');
 const urlsEditor = document.getElementById('urlsEditor');
 const urlCount = document.getElementById('urlCount');
@@ -158,7 +159,8 @@ function displayResults(summary, timestamp) {
   }
 
   htmlReportLink.href = `/result/comparison-report.html?t=${Date.now()}`;
-  csvReportLink.href = `/result/comparison-report.csv?t=${Date.now()}`;
+  csvReportEnglishLink.href = `/result/comparison-report-english.csv?t=${Date.now()}`;
+  csvReportOtherLink.href = `/result/comparison-report-other-languages.csv?t=${Date.now()}`;
 }
 
 function formatTimeAgo(timestamp) {

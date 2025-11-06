@@ -28,11 +28,27 @@ const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 const activeParsingJobs = new Map();
 
+/**
+ * Adjust URL for Dev environment
+ * Dev site uses /en/ prefix for all English pages
+ * Localized pages (e.g., /ar/page, /fr/page) remain unchanged
+ */
 function adjustUrlForDev(path) {
-  if (path.startsWith('/rto-materials/')) {
-    return '/en' + path;
+  // List of all supported locales
+  const LOCALES = ['ar', 'fr', 'de', 'es', 'it', 'pt', 'zh', 'ja', 'ko', 'nl'];
+
+  // Check if path is already localized (e.g., /ar/about, /fr/pricing)
+  const isLocalized = LOCALES.some(locale =>
+    path === `/${locale}` || path.startsWith(`/${locale}/`)
+  );
+
+  // If localized, return as-is
+  if (isLocalized) {
+    return path;
   }
-  return path;
+
+  // If English (no locale prefix), add /en/ prefix for Dev
+  return '/en' + path;
 }
 
 async function fetchPageData(baseUrl, path, checks) {
@@ -222,12 +238,58 @@ async function generateCsvReport(results, checks) {
     { id: 'devStatus', title: 'Dev HTTP' }
   );
 
+  // Main report (all languages)
   const csvWriter = createObjectCsvWriter({
     path: path.join(__dirname, 'result', 'comparison-report.csv'),
     header: headers
   });
-
   await csvWriter.writeRecords(results);
+
+  // Split into English and Other Languages
+  await splitReportsByLanguage(results, headers);
+}
+
+/**
+ * Split results into 2 CSV files:
+ * 1. English pages (URLs without locale prefix)
+ * 2. Other languages (ar, fr, de, es, it, pt, zh, ko, ja, nl)
+ */
+async function splitReportsByLanguage(results, headers) {
+  const LOCALES = ['ar', 'fr', 'de', 'es', 'it', 'pt', 'zh', 'ko', 'ja', 'nl'];
+
+  const englishResults = [];
+  const otherLanguagesResults = [];
+
+  for (const result of results) {
+    const url = result.url;
+
+    // Check if URL is localized (starts with /{locale}/)
+    const isLocalized = LOCALES.some(locale =>
+      url === `/${locale}` || url.startsWith(`/${locale}/`)
+    );
+
+    if (isLocalized) {
+      otherLanguagesResults.push(result);
+    } else {
+      englishResults.push(result);
+    }
+  }
+
+  // English CSV
+  const englishWriter = createObjectCsvWriter({
+    path: path.join(__dirname, 'result', 'comparison-report-english.csv'),
+    header: headers
+  });
+  await englishWriter.writeRecords(englishResults);
+
+  // Other languages CSV
+  const otherWriter = createObjectCsvWriter({
+    path: path.join(__dirname, 'result', 'comparison-report-other-languages.csv'),
+    header: headers
+  });
+  await otherWriter.writeRecords(otherLanguagesResults);
+
+  console.log(`Split reports: ${englishResults.length} English, ${otherLanguagesResults.length} Other languages`);
 }
 
 function generateHtmlReport(results, prodUrl, devUrl, checks) {
@@ -236,78 +298,203 @@ function generateHtmlReport(results, prodUrl, devUrl, checks) {
     fs.mkdirSync(resultDir, { recursive: true });
   }
 
-  const rows = results.map(r => {
-    const statusColor = r.status === 'OK' ? 'green' : r.status === 'DIFF' ? 'orange' : 'red';
-    const bgColor = r.status === 'DIFF' ? '#fff3cd' : r.status === 'ERROR' ? '#f8d7da' : '#d4edda';
+  // Group results by page type (base path without locale)
+  const groupedResults = groupByPageType(results);
 
-    const elementRows = [];
+  const rows = generateGroupedRows(groupedResults, checks, prodUrl, devUrl);
 
-    if (checks.title) {
-      elementRows.push(`
-        <td class="label-cell">Title</td>
-        <td class="${r.titleMatch === '❌' ? 'diff-cell' : ''}">${r.prodTitle || '<em>empty</em>'}</td>
-        <td class="${r.titleMatch === '❌' ? 'diff-cell' : ''}">${r.devTitle || '<em>empty</em>'}</td>
-        <td style="text-align: center;">${r.titleMatch}</td>
-      `);
-    }
+  const html = generateHtmlTemplate(results, rows, prodUrl, devUrl, checks);
 
-    if (checks.description) {
-      elementRows.push(`
-        <td class="label-cell">Description</td>
-        <td class="${r.descMatch === '❌' ? 'diff-cell' : ''}">${r.prodDescription || '<em>empty</em>'}</td>
-        <td class="${r.descMatch === '❌' ? 'diff-cell' : ''}">${r.devDescription || '<em>empty</em>'}</td>
-        <td style="text-align: center;">${r.descMatch}</td>
-      `);
-    }
+  fs.writeFileSync(path.join(__dirname, 'result', 'comparison-report.html'), html);
+}
 
-    if (checks.h1) {
-      elementRows.push(`
-        <td class="label-cell">H1</td>
-        <td class="${r.h1Match === '❌' ? 'diff-cell' : ''}">${r.prodH1 || '<em>empty</em>'}</td>
-        <td class="${r.h1Match === '❌' ? 'diff-cell' : ''}">${r.devH1 || '<em>empty</em>'}</td>
-        <td style="text-align: center;">${r.h1Match}</td>
-      `);
-    }
+/**
+ * Group results by page type (removing locale prefix)
+ */
+function groupByPageType(results) {
+  const LOCALES = ['ar', 'fr', 'de', 'es', 'it', 'pt', 'zh', 'ko', 'ja', 'nl'];
+  const groups = new Map();
 
-    if (checks.ogImage) {
-      elementRows.push(`
-        <td class="label-cell">OG Image</td>
-        <td class="small-text ${r.ogImageMatch === '❌' && !r.ogImageMigration ? 'diff-cell' : (r.ogImageMigration ? 'migration-cell' : '')}">${r.prodOgImage || '<em>empty</em>'}</td>
-        <td class="small-text ${r.ogImageMatch === '❌' && !r.ogImageMigration ? 'diff-cell' : (r.ogImageMigration ? 'migration-cell' : '')}">${r.devOgImage || '<em>empty</em>'}</td>
-        <td style="text-align: center;">${r.ogImageMatch}</td>
-      `);
-    }
+  for (const result of results) {
+    let basePath = result.url;
+    let locale = 'en';
 
-    const rowspan = elementRows.length;
-
-    const htmlRows = elementRows.map((rowContent, index) => {
-      if (index === 0) {
-        return `
-      <tr style="background-color: ${bgColor}">
-        <td rowspan="${rowspan}" class="url-cell">${r.url}</td>
-        <td rowspan="${rowspan}" class="status-cell" style="color: ${statusColor};">
-          ${r.status}
-          ${r.diffCount > 0 ? `<br><span class="small-text">(${r.diffCount} diffs)</span>` : ''}
-        </td>
-        ${rowContent}
-      </tr>`;
-      } else {
-        return `
-      <tr style="background-color: ${bgColor}">
-        ${rowContent}
-      </tr>`;
+    // Extract locale and base path
+    for (const loc of LOCALES) {
+      if (result.url === `/${loc}`) {
+        basePath = '/';
+        locale = loc;
+        break;
+      } else if (result.url.startsWith(`/${loc}/`)) {
+        basePath = result.url.substring(loc.length + 1); // Remove /{locale}
+        locale = loc;
+        break;
       }
-    }).join('');
+    }
 
-    return `
-      ${htmlRows}
-      <tr style="border-bottom: 2px solid #333;">
-        <td colspan="6" style="padding: 8px; background-color: #f8f9fa;">
-          <strong>Differences:</strong> ${r.notes}
+    if (!groups.has(basePath)) {
+      groups.set(basePath, []);
+    }
+
+    groups.get(basePath).push({ ...result, locale });
+  }
+
+  // Sort groups by base path
+  return new Map([...groups.entries()].sort());
+}
+
+/**
+ * Generate HTML rows grouped by page type
+ */
+function generateGroupedRows(groupedResults, checks, prodUrl, devUrl) {
+  let html = '';
+
+  for (const [basePath, pageResults] of groupedResults) {
+    const pageTitle = basePath === '/' ? 'Home Pages' : `${basePath} Pages`;
+    const pageCount = pageResults.length;
+
+    // Group header
+    html += `
+      <tr class="group-header">
+        <td colspan="6">
+          <h3 style="margin: 0; padding: 10px 0;">
+            📄 ${pageTitle}
+            <span style="font-size: 14px; font-weight: normal; color: #666;">
+              (${pageCount} language${pageCount > 1 ? 's' : ''})
+            </span>
+          </h3>
         </td>
       </tr>
     `;
+
+    // Sort by locale (en first, then alphabetically)
+    const sortedResults = pageResults.sort((a, b) => {
+      if (a.locale === 'en') return -1;
+      if (b.locale === 'en') return 1;
+      return a.locale.localeCompare(b.locale);
+    });
+
+    // Generate rows for each language version
+    for (const r of sortedResults) {
+      html += generatePageRow(r, checks, prodUrl, devUrl);
+    }
+  }
+
+  return html;
+}
+
+/**
+ * Generate HTML row for a single page result
+ */
+function generatePageRow(r, checks, prodUrl, devUrl) {
+  const statusColor = r.status === 'OK' ? 'green' : r.status === 'DIFF' ? 'orange' : 'red';
+  const bgColor = r.status === 'DIFF' ? '#fff3cd' : r.status === 'ERROR' ? '#f8d7da' : '#d4edda';
+
+  const elementRows = [];
+
+  if (checks.title) {
+    const cellClass = r.titleMatch === '✅' ? 'match-cell' : 'diff-cell';
+    elementRows.push(`
+      <td class="label-cell">Title</td>
+      <td class="${cellClass}">${r.prodTitle || '<em>empty</em>'}</td>
+      <td class="${cellClass}">${r.devTitle || '<em>empty</em>'}</td>
+      <td style="text-align: center;">${r.titleMatch}</td>
+    `);
+  }
+
+  if (checks.description) {
+    const cellClass = r.descMatch === '✅' ? 'match-cell' : 'diff-cell';
+    elementRows.push(`
+      <td class="label-cell">Description</td>
+      <td class="${cellClass}">${r.prodDescription || '<em>empty</em>'}</td>
+      <td class="${cellClass}">${r.devDescription || '<em>empty</em>'}</td>
+      <td style="text-align: center;">${r.descMatch}</td>
+    `);
+  }
+
+  if (checks.h1) {
+    const cellClass = r.h1Match === '✅' ? 'match-cell' : 'diff-cell';
+    elementRows.push(`
+      <td class="label-cell">H1</td>
+      <td class="${cellClass}">${r.prodH1 || '<em>empty</em>'}</td>
+      <td class="${cellClass}">${r.devH1 || '<em>empty</em>'}</td>
+      <td style="text-align: center;">${r.h1Match}</td>
+    `);
+  }
+
+  if (checks.ogImage) {
+    let cellClass = 'match-cell';
+    if (r.ogImageMatch === '⚠️') {
+      cellClass = 'migration-cell'; // Yellow - CDN migration is OK
+    } else if (r.ogImageMatch === '❌') {
+      cellClass = 'diff-cell'; // Red - real difference
+    }
+
+    elementRows.push(`
+      <td class="label-cell">OG Image</td>
+      <td class="small-text ${cellClass}">${r.prodOgImage || '<em>empty</em>'}</td>
+      <td class="small-text ${cellClass}">${r.devOgImage || '<em>empty</em>'}</td>
+      <td style="text-align: center;">${r.ogImageMatch}</td>
+    `);
+  }
+
+  const rowspan = elementRows.length;
+
+  // Build clickable URLs for Prod and Dev
+  const devPath = adjustUrlForDev(r.url);
+  const prodFullUrl = `${prodUrl}${r.url}`;
+  const devFullUrl = `${devUrl}${devPath}`;
+
+  // Add locale badge and clickable links
+  const localeLabel = r.locale === 'en' ? '🇬🇧 EN' : `🌍 ${r.locale.toUpperCase()}`;
+  const urlDisplay = `
+    <div style="margin-bottom: 8px;">
+      <strong>${r.url}</strong>
+      <span class="locale-badge" style="background: #e0e0e0; padding: 2px 6px; border-radius: 3px; font-size: 11px; margin-left: 8px;">${localeLabel}</span>
+    </div>
+    <div style="display: flex; gap: 8px; margin-top: 4px;">
+      <a href="${prodFullUrl}" target="_blank" style="background: #4CAF50; color: white; padding: 4px 10px; border-radius: 4px; text-decoration: none; font-size: 11px;">
+        🔗 Prod
+      </a>
+      <a href="${devFullUrl}" target="_blank" style="background: #2196F3; color: white; padding: 4px 10px; border-radius: 4px; text-decoration: none; font-size: 11px;">
+        🔗 Dev
+      </a>
+    </div>
+  `;
+
+  const htmlRows = elementRows.map((rowContent, index) => {
+    if (index === 0) {
+      return `
+    <tr style="background-color: ${bgColor}">
+      <td rowspan="${rowspan}" class="url-cell">${urlDisplay}</td>
+      <td rowspan="${rowspan}" class="status-cell" style="color: ${statusColor};">
+        ${r.status}
+        ${r.diffCount > 0 ? `<br><span class="small-text">(${r.diffCount} diffs)</span>` : ''}
+      </td>
+      ${rowContent}
+    </tr>`;
+    } else {
+      return `
+    <tr style="background-color: ${bgColor}">
+      ${rowContent}
+    </tr>`;
+    }
   }).join('');
+
+  return `
+    ${htmlRows}
+    <tr style="border-bottom: 2px solid #333;">
+      <td colspan="6" style="padding: 8px; background-color: #f8f9fa;">
+        <strong>Differences:</strong> ${r.notes}
+      </td>
+    </tr>
+  `;
+}
+
+/**
+ * Generate complete HTML template
+ */
+function generateHtmlTemplate(results, rows, prodUrl, devUrl, checks) {
 
   const html = `
 <!DOCTYPE html>
@@ -331,8 +518,11 @@ function generateHtmlReport(results, prodUrl, devUrl, checks) {
     .status-cell { font-weight: bold; text-align: center; vertical-align: top; }
     .label-cell { font-weight: bold; }
     .small-text { font-size: 11px; color: #666; }
+    .match-cell { background-color: #d4edda !important; border-left: 3px solid #28a745 !important; }
     .diff-cell { background-color: #ffe6e6 !important; border-left: 3px solid #ff4444 !important; }
-    .migration-cell { background-color: #fff9e6 !important; border-left: 3px solid #ffa500 !important; }
+    .migration-cell { background-color: #fff3cd !important; border-left: 3px solid #ffa500 !important; }
+    .group-header { background-color: #f0f0f0; font-weight: bold; }
+    .group-header td { border-top: 3px solid #333 !important; padding: 15px 10px !important; }
   </style>
 </head>
 <body>
@@ -391,7 +581,7 @@ function generateHtmlReport(results, prodUrl, devUrl, checks) {
 </html>
   `;
 
-  fs.writeFileSync(path.join(__dirname, 'result', 'comparison-report.html'), html);
+  return html;
 }
 
 async function runParser(config, socket) {
@@ -647,11 +837,12 @@ app.post('/api/sitemap', async (req, res) => {
     console.log('Starting sitemap parse...');
 
     const SITEMAP_URL = 'https://www.coursebox.ai/sitemap.xml';
-    const EXCLUDED_LOCALES = ['ar', 'fr', 'de', 'es', 'it', 'pt', 'ru', 'zh', 'ja', 'ko', 'nl', 'pl', 'sv', 'tr', 'he', 'hi', 'th', 'vi', 'id', 'ms', 'fil', 'uk', 'ro', 'cs'];
+
+    // Paths to exclude from parsing (CSV-generated pages)
+    const EXCLUDED_PATHS = ['/blog/', '/rto-materials/', '/alternatives/'];
+
+    // Template patterns (only keep 1 example per template)
     const TEMPLATE_PATTERNS = [
-      { pattern: /^\/rto-materials\/[^\/]+$/, name: '/rto-materials/[slug]' },
-      { pattern: /^\/alternatives\/[^\/]+$/, name: '/alternatives/[slug]' },
-      { pattern: /^\/blog\/[^\/]+$/, name: '/blog/[slug]' },
       { pattern: /^\/features\/[^\/]+$/, name: '/features/[slug]' },
       { pattern: /^\/team\/[^\/]+$/, name: '/team/[slug]' }
     ];
@@ -699,17 +890,11 @@ app.post('/api/sitemap', async (req, res) => {
         pathname = pathname.slice(0, -1);
       }
 
-      // Keep /ar as example
-      if (pathname === '/ar') {
-        filtered.push(pathname);
-        continue;
-      }
-
-      // Skip localized
-      const isLocalized = EXCLUDED_LOCALES.some(locale => {
-        return pathname === `/${locale}` || pathname.startsWith(`/${locale}/`);
-      });
-      if (isLocalized) continue;
+      // Skip excluded paths (blog, rto-materials)
+      const isExcluded = EXCLUDED_PATHS.some(excludedPath =>
+        pathname.includes(excludedPath)
+      );
+      if (isExcluded) continue;
 
       // Check template
       let template = null;
