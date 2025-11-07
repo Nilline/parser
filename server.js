@@ -30,25 +30,11 @@ const activeParsingJobs = new Map();
 
 /**
  * Adjust URL for Dev environment
- * Dev site uses /en/ prefix for all English pages
- * Localized pages (e.g., /ar/page, /fr/page) remain unchanged
+ * Both Prod and Dev use same URL structure (no /en/ prefix for English)
  */
 function adjustUrlForDev(path) {
-  // List of all supported locales
-  const LOCALES = ['ar', 'fr', 'de', 'es', 'it', 'pt', 'zh', 'ja', 'ko', 'nl'];
-
-  // Check if path is already localized (e.g., /ar/about, /fr/pricing)
-  const isLocalized = LOCALES.some(locale =>
-    path === `/${locale}` || path.startsWith(`/${locale}/`)
-  );
-
-  // If localized, return as-is
-  if (isLocalized) {
-    return path;
-  }
-
-  // If English (no locale prefix), add /en/ prefix for Dev
-  return '/en' + path;
+  // Return path as-is without adding /en/ prefix
+  return path;
 }
 
 async function fetchPageData(baseUrl, path, checks) {
