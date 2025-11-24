@@ -295,24 +295,44 @@ function generateHtmlReport(results, prodUrl, devUrl, checks) {
 }
 
 /**
- * Group results by page type (removing locale prefix)
+ * Group results by page type (using sitemap-based mapping)
  */
 function groupByPageType(results) {
-  const LOCALES = ['ar', 'fr', 'de', 'es', 'it', 'pt', 'zh', 'ko', 'ja', 'nl'];
+  const LOCALES = ['en', 'ar', 'fr', 'de', 'es', 'it', 'pt', 'zh', 'ko', 'ja', 'nl'];
   const groups = new Map();
 
-  for (const result of results) {
-    let basePath = result.url;
-    let locale = 'en';
+  // Load pages mapping (sitemap-based)
+  let pagesMapping = {};
+  try {
+    const mappingPath = path.join(__dirname, 'pages-mapping.json');
+    if (fs.existsSync(mappingPath)) {
+      pagesMapping = JSON.parse(fs.readFileSync(mappingPath, 'utf8'));
+    }
+  } catch (error) {
+    console.warn('Warning: Could not load pages-mapping.json, using fallback grouping');
+  }
 
-    // Extract locale and base path
+  for (const result of results) {
+    // Определяем базовый URL из маппинга (если есть)
+    let basePath = pagesMapping[result.url] || result.url;
+
+    // Fallback: если маппинга нет, используем старую логику
+    if (!pagesMapping[result.url]) {
+      for (const loc of LOCALES) {
+        if (result.url === `/${loc}`) {
+          basePath = '/';
+          break;
+        } else if (result.url.startsWith(`/${loc}/`)) {
+          basePath = result.url.substring(loc.length + 1); // Remove /{locale}
+          break;
+        }
+      }
+    }
+
+    // Определяем локаль
+    let locale = 'en';
     for (const loc of LOCALES) {
-      if (result.url === `/${loc}`) {
-        basePath = '/';
-        locale = loc;
-        break;
-      } else if (result.url.startsWith(`/${loc}/`)) {
-        basePath = result.url.substring(loc.length + 1); // Remove /{locale}
+      if (result.url === `/${loc}` || result.url.startsWith(`/${loc}/`)) {
         locale = loc;
         break;
       }
