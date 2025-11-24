@@ -509,6 +509,35 @@ function generateHtmlTemplate(results, rows, prodUrl, devUrl, checks) {
     .migration-cell { background-color: #fff3cd !important; border-left: 3px solid #ffa500 !important; }
     .group-header { background-color: #f0f0f0; font-weight: bold; }
     .group-header td { border-top: 3px solid #333 !important; padding: 15px 10px !important; }
+
+    /* Filter buttons */
+    .filter-buttons { margin: 15px 0; display: flex; gap: 10px; flex-wrap: wrap; }
+    .filter-btn {
+      padding: 10px 20px;
+      border: 2px solid #ddd;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: bold;
+      transition: all 0.2s;
+    }
+    .filter-btn:hover { transform: translateY(-2px); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+    .filter-btn.active { border-width: 3px; }
+    .filter-btn[data-filter="all"] { background: #f0f0f0; }
+    .filter-btn[data-filter="all"].active { background: #333; color: white; border-color: #333; }
+    .filter-btn[data-filter="OK"] { background: #d4edda; color: #155724; }
+    .filter-btn[data-filter="OK"].active { background: #28a745; color: white; border-color: #28a745; }
+    .filter-btn[data-filter="DIFF"] { background: #fff3cd; color: #856404; }
+    .filter-btn[data-filter="DIFF"].active { background: #ffc107; color: #333; border-color: #ffc107; }
+    .filter-btn[data-filter="ERROR"] { background: #f8d7da; color: #721c24; }
+    .filter-btn[data-filter="ERROR"].active { background: #dc3545; color: white; border-color: #dc3545; }
+
+    /* Hidden rows */
+    tr.hidden { display: none; }
+    .group-header.hidden { display: none; }
+
+    /* Filter counter */
+    .filter-count { font-size: 12px; margin-left: 5px; opacity: 0.8; }
   </style>
 </head>
 <body>
@@ -548,6 +577,21 @@ function generateHtmlTemplate(results, rows, prodUrl, devUrl, checks) {
 
   <h3>📄 Detailed Comparison</h3>
 
+  <div class="filter-buttons">
+    <button class="filter-btn active" data-filter="all">
+      🔍 All <span class="filter-count">(${results.length})</span>
+    </button>
+    <button class="filter-btn" data-filter="OK">
+      ✅ OK <span class="filter-count">(${results.filter(r => r.status === 'OK').length})</span>
+    </button>
+    <button class="filter-btn" data-filter="DIFF">
+      ⚠️ DIFF <span class="filter-count">(${results.filter(r => r.status === 'DIFF').length})</span>
+    </button>
+    <button class="filter-btn" data-filter="ERROR">
+      ❌ ERROR <span class="filter-count">(${results.filter(r => r.status === 'ERROR').length})</span>
+    </button>
+  </div>
+
   <table>
     <thead>
       <tr>
@@ -563,6 +607,68 @@ function generateHtmlTemplate(results, rows, prodUrl, devUrl, checks) {
       ${rows}
     </tbody>
   </table>
+
+  <script>
+    // Filter functionality
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+      btn.addEventListener('click', function() {
+        const filter = this.dataset.filter;
+
+        // Update active button
+        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        this.classList.add('active');
+
+        // Get all page groups
+        const groups = document.querySelectorAll('.group-header');
+
+        groups.forEach(groupHeader => {
+          // Find all rows belonging to this group (until next group-header)
+          const groupRows = [];
+          let nextRow = groupHeader.nextElementSibling;
+          while (nextRow && !nextRow.classList.contains('group-header')) {
+            groupRows.push(nextRow);
+            nextRow = nextRow.nextElementSibling;
+          }
+
+          // Check statuses in this group
+          const statusCells = groupRows.filter(row => row.querySelector('.status-cell'));
+          const statuses = statusCells.map(row => {
+            const cell = row.querySelector('.status-cell');
+            return cell ? cell.textContent.trim().split('\\n')[0] : '';
+          });
+
+          // Show/hide based on filter
+          if (filter === 'all') {
+            groupHeader.classList.remove('hidden');
+            groupRows.forEach(row => row.classList.remove('hidden'));
+          } else {
+            // Check if any row in group matches filter
+            const hasMatch = statuses.some(s => s === filter);
+
+            if (hasMatch) {
+              groupHeader.classList.remove('hidden');
+              // Show only matching page blocks
+              let currentStatus = '';
+              groupRows.forEach(row => {
+                const statusCell = row.querySelector('.status-cell');
+                if (statusCell) {
+                  currentStatus = statusCell.textContent.trim().split('\\n')[0];
+                }
+                if (currentStatus === filter) {
+                  row.classList.remove('hidden');
+                } else {
+                  row.classList.add('hidden');
+                }
+              });
+            } else {
+              groupHeader.classList.add('hidden');
+              groupRows.forEach(row => row.classList.add('hidden'));
+            }
+          }
+        });
+      });
+    });
+  </script>
 </body>
 </html>
   `;
@@ -851,13 +957,29 @@ app.post('/api/sitemap', async (req, res) => {
 
     // Parse XML
     const $ = cheerio.load(xml, { xmlMode: true });
-    const urls = [];
-    $('url loc').each((_, element) => {
-      const url = $(element).text().trim();
-      if (url) urls.push(url);
+    const urlsSet = new Set(); // Use Set to avoid duplicates
+
+    // Extract URLs from <loc> and hreflang <link> tags
+    $('url').each((_, urlNode) => {
+      const $url = $(urlNode);
+
+      // Main <loc> tag
+      const mainLoc = $url.find('loc').text().trim();
+      if (mainLoc) urlsSet.add(mainLoc);
+
+      // All <xhtml:link rel="alternate" hreflang="..."> tags
+      $url.find('link[rel="alternate"]').each((_, link) => {
+        const href = $(link).attr('href');
+        const hreflang = $(link).attr('hreflang');
+        // Skip x-default, only add actual language versions
+        if (href && hreflang && hreflang !== 'x-default') {
+          urlsSet.add(href);
+        }
+      });
     });
 
-    console.log(`Found ${urls.length} URLs in sitemap`);
+    const urls = Array.from(urlsSet);
+    console.log(`Found ${urls.length} URLs in sitemap (including all translations)`);
 
     if (urls.length === 0) {
       throw new Error('No URLs found in sitemap');
