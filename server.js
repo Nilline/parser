@@ -7,6 +7,7 @@ const path = require('path');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const { createObjectCsvWriter } = require('csv-writer');
+const sitemapCompare = require('./lib/sitemap-compare');
 
 const app = express();
 const server = http.createServer(app);
@@ -1063,12 +1064,160 @@ app.post('/api/sitemap', async (req, res) => {
   }
 });
 
+// Sitemap comparison endpoint
+const activeSitemapJobs = new Map();
+
+app.post('/api/compare-sitemaps', async (req, res) => {
+  try {
+    const { devUrl } = req.body;
+    const socketId = req.body.socketId;
+    const socket = io.sockets.sockets.get(socketId);
+
+    if (!socket) {
+      return res.status(400).json({ error: 'Socket connection not found' });
+    }
+
+    // Check if already running
+    if (activeSitemapJobs.get(socketId)) {
+      return res.status(400).json({ error: 'Comparison already running' });
+    }
+
+    activeSitemapJobs.set(socketId, { running: true });
+
+    // Path to Webflow sitemap
+    const prodSitemapPath = path.join(__dirname, 'data', 'sitemap.xml');
+
+    if (!fs.existsSync(prodSitemapPath)) {
+      activeSitemapJobs.delete(socketId);
+      return res.status(400).json({ error: 'Webflow sitemap not found. Please download it first.' });
+    }
+
+    res.json({ success: true, message: 'Sitemap comparison started' });
+
+    // Run comparison async
+    try {
+      socket.emit('sitemap-progress', { type: 'start', message: 'Starting sitemap comparison...' });
+
+      const result = await sitemapCompare.runComparison(
+        { prodSitemapPath, devUrl },
+        (data) => socket.emit('sitemap-progress', data)
+      );
+
+      // Save results
+      const resultDir = path.join(__dirname, 'result');
+      if (!fs.existsSync(resultDir)) {
+        fs.mkdirSync(resultDir, { recursive: true });
+      }
+
+      // Generate HTML report
+      const htmlReport = sitemapCompare.generateHtmlReport(
+        result.comparison,
+        result.stats,
+        { prodUrl: 'https://www.coursebox.ai', devUrl }
+      );
+      fs.writeFileSync(path.join(resultDir, 'sitemap-comparison.html'), htmlReport);
+
+      // Save JSON report
+      const jsonReport = {
+        timestamp: new Date().toISOString(),
+        config: { prodUrl: 'https://www.coursebox.ai', devUrl },
+        stats: result.stats,
+        issues: {
+          missingInNextjs: result.comparison.issues.missingInNextjs,
+          missingInWebflow: result.comparison.issues.missingInWebflow,
+          missingLanguages: result.comparison.issues.missingLanguages
+        }
+      };
+      fs.writeFileSync(path.join(resultDir, 'sitemap-comparison.json'), JSON.stringify(jsonReport, null, 2));
+
+      socket.emit('sitemap-progress', {
+        type: 'complete',
+        stats: result.stats,
+        issues: {
+          missingInNextjs: result.comparison.issues.missingInNextjs.length,
+          missingInWebflow: result.comparison.issues.missingInWebflow.length,
+          missingLanguages: result.comparison.issues.missingLanguages.length
+        }
+      });
+
+    } catch (err) {
+      socket.emit('sitemap-progress', { type: 'error', message: err.message });
+    } finally {
+      activeSitemapJobs.delete(socketId);
+    }
+
+  } catch (error) {
+    console.error('Sitemap comparison error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/sitemap-reports', (req, res) => {
+  try {
+    const resultDir = path.join(__dirname, 'result');
+    const jsonPath = path.join(resultDir, 'sitemap-comparison.json');
+    const htmlPath = path.join(resultDir, 'sitemap-comparison.html');
+
+    if (!fs.existsSync(jsonPath)) {
+      return res.json({ exists: false });
+    }
+
+    const report = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
+
+    res.json({
+      exists: true,
+      html: fs.existsSync(htmlPath),
+      timestamp: report.timestamp,
+      stats: report.stats,
+      issues: {
+        missingInNextjs: report.issues.missingInNextjs.length,
+        missingInWebflow: report.issues.missingInWebflow.length,
+        missingLanguages: report.issues.missingLanguages.length
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Download/refresh Webflow sitemap
+app.post('/api/refresh-webflow-sitemap', async (req, res) => {
+  try {
+    const SITEMAP_URL = 'https://www.coursebox.ai/sitemap.xml';
+
+    const response = await axios.get(SITEMAP_URL, {
+      timeout: 60000,
+      headers: { 'User-Agent': 'Coursebox-Migration-Parser/1.0' }
+    });
+
+    const dataDir = path.join(__dirname, 'data');
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+
+    fs.writeFileSync(path.join(dataDir, 'sitemap.xml'), response.data);
+
+    // Count URLs
+    const urlCount = (response.data.match(/<loc>/g) || []).length;
+
+    res.json({
+      success: true,
+      message: 'Webflow sitemap downloaded',
+      urlCount,
+      size: response.data.length
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
 
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
     activeParsingJobs.delete(socket.id);
+    activeSitemapJobs.delete(socket.id);
   });
 });
 

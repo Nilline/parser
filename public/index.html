@@ -13,112 +13,168 @@
       <p class="subtitle">Compare Production vs Development sites for migration validation</p>
     </header>
 
+    <!-- Tabs -->
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="page-compare">📄 Page Compare</button>
+      <button class="tab-btn" data-tab="sitemap-compare">🗺️ Sitemap Compare</button>
+    </div>
+
     <main>
-      <section class="config-section">
-        <h2>Configuration</h2>
+      <!-- Tab 1: Page Compare (existing functionality) -->
+      <div id="tab-page-compare" class="tab-content active">
+        <section class="config-section">
+          <h2>Configuration</h2>
 
-        <div class="form-group">
-          <label for="prodUrl">Production URL</label>
-          <input
-            type="text"
-            id="prodUrl"
-            placeholder="https://www.coursebox.ai"
-            value="https://www.coursebox.ai"
-          >
-        </div>
-
-        <div class="form-group">
-          <label for="devUrl">Development URL</label>
-          <input
-            type="text"
-            id="devUrl"
-            placeholder="https://coursebox-ai.vercel.app"
-            value="https://coursebox-ai.vercel.app"
-          >
-        </div>
-
-        <div class="form-group">
-          <label>Elements to Compare</label>
-          <div class="checkbox-group">
-            <label class="checkbox-label">
-              <input type="checkbox" id="checkStatus" checked disabled>
-              <span>URL Status (required)</span>
-            </label>
-            <label class="checkbox-label">
-              <input type="checkbox" id="checkTitle" checked>
-              <span>Title Tags</span>
-            </label>
-            <label class="checkbox-label">
-              <input type="checkbox" id="checkDescription" checked>
-              <span>Meta Descriptions</span>
-            </label>
-            <label class="checkbox-label">
-              <input type="checkbox" id="checkH1" checked>
-              <span>H1 Headings</span>
-            </label>
-            <label class="checkbox-label">
-              <input type="checkbox" id="checkOgImage" checked>
-              <span>OG Images</span>
-            </label>
+          <div class="form-group">
+            <label for="prodUrl">Production URL</label>
+            <input
+              type="text"
+              id="prodUrl"
+              placeholder="https://www.coursebox.ai"
+              value="https://www.coursebox.ai"
+            >
           </div>
-        </div>
 
-        <div class="button-group">
-          <button id="startButton" class="btn-primary">Start Comparison</button>
-          <button id="stopButton" class="btn-danger" style="display: none;">Stop Parser</button>
-        </div>
-      </section>
-
-      <section class="urls-section">
-        <h2>URL List</h2>
-        <p class="subtitle-small">Edit the list of URLs to compare. One URL per line. Lines starting with # are ignored.</p>
-
-        <div class="urls-stats">
-          <span id="urlCount">0 URLs</span>
-          <div class="button-group-inline">
-            <button id="parseSitemapButton" class="btn-small btn-secondary-small">Import from Sitemap</button>
-            <button id="saveUrlsButton" class="btn-small">Save Changes</button>
+          <div class="form-group">
+            <label for="devUrl">Development URL</label>
+            <input
+              type="text"
+              id="devUrl"
+              placeholder="https://coursebox-ai.vercel.app"
+              value="https://coursebox-ai.vercel.app"
+            >
           </div>
-        </div>
 
-        <textarea id="urlsEditor" placeholder="Enter URLs, one per line...
+          <div class="form-group">
+            <label>Elements to Compare</label>
+            <div class="checkbox-group">
+              <label class="checkbox-label">
+                <input type="checkbox" id="checkStatus" checked disabled>
+                <span>URL Status (required)</span>
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" id="checkTitle" checked>
+                <span>Title Tags</span>
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" id="checkDescription" checked>
+                <span>Meta Descriptions</span>
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" id="checkH1" checked>
+                <span>H1 Headings</span>
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" id="checkOgImage" checked>
+                <span>OG Images</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="button-group">
+            <button id="startButton" class="btn-primary">Start Comparison</button>
+            <button id="stopButton" class="btn-danger" style="display: none;">Stop Parser</button>
+          </div>
+        </section>
+
+        <section class="urls-section">
+          <h2>URL List</h2>
+          <p class="subtitle-small">Edit the list of URLs to compare. One URL per line. Lines starting with # are ignored.</p>
+
+          <div class="urls-stats">
+            <span id="urlCount">0 URLs</span>
+            <div class="button-group-inline">
+              <button id="parseSitemapButton" class="btn-small btn-secondary-small">Import from Sitemap</button>
+              <button id="saveUrlsButton" class="btn-small">Save Changes</button>
+            </div>
+          </div>
+
+          <textarea id="urlsEditor" placeholder="Enter URLs, one per line...
 Example:
 /
 /about
 /pricing
 # This is a comment"></textarea>
-      </section>
+        </section>
 
-      <section class="progress-section" id="progressSection" style="display: none;">
-        <h2>Progress</h2>
-        <div class="progress-bar">
-          <div class="progress-fill" id="progressFill"></div>
-          <span class="progress-text" id="progressText">0%</span>
-        </div>
-        <div class="progress-log" id="progressLog"></div>
-      </section>
+        <section class="progress-section" id="progressSection" style="display: none;">
+          <h2>Progress</h2>
+          <div class="progress-bar">
+            <div class="progress-fill" id="progressFill"></div>
+            <span class="progress-text" id="progressText">0%</span>
+          </div>
+          <div class="progress-log" id="progressLog"></div>
+        </section>
 
-      <section class="results-section" id="resultsSection" style="display: none;">
-        <h2>Results</h2>
+        <section class="results-section" id="resultsSection" style="display: none;">
+          <h2>Results</h2>
 
-        <div class="summary-grid" id="summaryGrid"></div>
+          <div class="summary-grid" id="summaryGrid"></div>
 
-        <div class="report-links">
-          <a href="#" id="htmlReportLink" class="btn-secondary" target="_blank">
-            📄 View HTML Report
-          </a>
-          <a href="#" id="csvReportEnglishLink" class="btn-secondary" download>
-            📊 Download English CSV
-          </a>
-          <a href="#" id="csvReportOtherLink" class="btn-secondary" download>
-            🌍 Download Other Languages CSV
-          </a>
-        </div>
-      </section>
+          <div class="report-links">
+            <a href="#" id="htmlReportLink" class="btn-secondary" target="_blank">
+              📄 View HTML Report
+            </a>
+            <a href="#" id="csvReportEnglishLink" class="btn-secondary" download>
+              📊 Download English CSV
+            </a>
+            <a href="#" id="csvReportOtherLink" class="btn-secondary" download>
+              🌍 Download Other Languages CSV
+            </a>
+          </div>
+        </section>
+      </div>
+
+      <!-- Tab 2: Sitemap Compare (new functionality) -->
+      <div id="tab-sitemap-compare" class="tab-content">
+        <section class="config-section">
+          <h2>Sitemap Comparison</h2>
+          <p class="subtitle-small">Compare Webflow (prod) sitemap with Next.js (dev) sitemap to find missing pages and translations.</p>
+
+          <div class="form-group">
+            <label for="sitemapDevUrl">Development URL</label>
+            <input
+              type="text"
+              id="sitemapDevUrl"
+              placeholder="https://your-dev-site.vercel.app"
+              value="https://coursebox-ai.vercel.app"
+            >
+          </div>
+
+          <div class="sitemap-info" id="sitemapInfo">
+            <div class="info-card">
+              <span class="info-label">Webflow Sitemap</span>
+              <span class="info-value" id="webflowSitemapStatus">Checking...</span>
+            </div>
+          </div>
+
+          <div class="button-group">
+            <button id="refreshWebflowSitemap" class="btn-small btn-secondary-small">🔄 Refresh Webflow Sitemap</button>
+            <button id="startSitemapCompare" class="btn-primary">Start Comparison</button>
+          </div>
+        </section>
+
+        <section class="progress-section" id="sitemapProgressSection" style="display: none;">
+          <h2>Progress</h2>
+          <div class="progress-log" id="sitemapProgressLog"></div>
+        </section>
+
+        <section class="results-section" id="sitemapResultsSection" style="display: none;">
+          <h2>Results</h2>
+
+          <div class="summary-grid" id="sitemapSummaryGrid"></div>
+
+          <div class="report-links">
+            <a href="#" id="sitemapHtmlReportLink" class="btn-secondary" target="_blank">
+              📄 View Detailed Report
+            </a>
+          </div>
+        </section>
+      </div>
     </main>
 
     <footer>
-      <p>Coursebox Parser v1.0 | <span id="status">Disconnected</span></p>
+      <p>Coursebox Parser v1.1 | <span id="status">Disconnected</span></p>
     </footer>
   </div>
 

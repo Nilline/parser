@@ -9,16 +9,22 @@
     "parse": "node parsers/parser.js",
     "sitemap": "node parsers/sitemap-parser.js"
   },
-  "keywords": ["parser", "scraper", "seo", "migration"],
+  "keywords": [
+    "parser",
+    "scraper",
+    "seo",
+    "migration"
+  ],
   "author": "Coursebox Team",
   "license": "MIT",
   "dependencies": {
     "axios": "^1.6.2",
     "cheerio": "^1.0.0-rc.12",
+    "cors": "^2.8.5",
     "csv-writer": "^1.6.0",
     "express": "^4.18.2",
     "socket.io": "^4.6.1",
-    "cors": "^2.8.5"
+    "xml2js": "^0.6.2"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"

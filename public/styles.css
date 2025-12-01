@@ -411,6 +411,15 @@ textarea:focus {
   color: var(--error);
 }
 
+.summary-card.info {
+  border-color: var(--primary);
+  background: rgba(37, 99, 235, 0.05);
+}
+
+.summary-card.info .value {
+  color: var(--primary);
+}
+
 .summary-card small {
   display: block;
   margin-top: 0.5rem;
@@ -468,4 +477,80 @@ footer {
 
 .progress-log::-webkit-scrollbar-thumb:hover {
   background: var(--secondary);
+}
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 2rem;
+  background: var(--bg-card);
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 12px 20px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.tab-btn:hover {
+  background: var(--bg-main);
+  color: var(--text-primary);
+}
+
+.tab-btn.active {
+  background: var(--primary);
+  color: white;
+}
+
+.tab-content {
+  display: none;
+}
+
+.tab-content.active {
+  display: block;
+}
+
+/* Sitemap Compare specific */
+.sitemap-info {
+  margin: 1rem 0;
+  padding: 1rem;
+  background: var(--bg-main);
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+.info-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.info-label {
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.info-value {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.info-value.success {
+  color: var(--success);
+}
+
+.info-value.error {
+  color: var(--error);
 }

@@ -391,3 +391,218 @@ async function loadConfig() {
 loadConfig();
 loadUrls();
 checkExistingReports();
+
+// ============================================
+// Tab Navigation
+// ============================================
+
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const tabId = btn.dataset.tab;
+
+    // Update buttons
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+
+    // Update content
+    document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+    document.getElementById(`tab-${tabId}`).classList.add('active');
+  });
+});
+
+// ============================================
+// Sitemap Compare Tab
+// ============================================
+
+const sitemapDevUrlInput = document.getElementById('sitemapDevUrl');
+const webflowSitemapStatus = document.getElementById('webflowSitemapStatus');
+const refreshWebflowSitemapBtn = document.getElementById('refreshWebflowSitemap');
+const startSitemapCompareBtn = document.getElementById('startSitemapCompare');
+const sitemapProgressSection = document.getElementById('sitemapProgressSection');
+const sitemapProgressLog = document.getElementById('sitemapProgressLog');
+const sitemapResultsSection = document.getElementById('sitemapResultsSection');
+const sitemapSummaryGrid = document.getElementById('sitemapSummaryGrid');
+const sitemapHtmlReportLink = document.getElementById('sitemapHtmlReportLink');
+
+let sitemapCompareRunning = false;
+
+// Check Webflow sitemap status
+async function checkWebflowSitemap() {
+  try {
+    const response = await fetch('/api/sitemap-reports');
+    const data = await response.json();
+
+    if (data.exists) {
+      webflowSitemapStatus.textContent = `✅ Available (${formatTimeAgo(data.timestamp)})`;
+      webflowSitemapStatus.className = 'info-value success';
+
+      // Show existing results
+      displaySitemapResults(data.stats, data.issues, data.timestamp);
+    } else {
+      webflowSitemapStatus.textContent = '⚠️ Not downloaded yet';
+      webflowSitemapStatus.className = 'info-value';
+    }
+  } catch (error) {
+    webflowSitemapStatus.textContent = '❌ Error checking status';
+    webflowSitemapStatus.className = 'info-value error';
+  }
+}
+
+// Refresh Webflow sitemap
+refreshWebflowSitemapBtn.addEventListener('click', async () => {
+  try {
+    refreshWebflowSitemapBtn.disabled = true;
+    refreshWebflowSitemapBtn.textContent = '⏳ Downloading...';
+
+    const response = await fetch('/api/refresh-webflow-sitemap', { method: 'POST' });
+    const result = await response.json();
+
+    if (result.success) {
+      refreshWebflowSitemapBtn.textContent = `✅ Downloaded (${result.urlCount} URLs)`;
+      webflowSitemapStatus.textContent = '✅ Just updated';
+      webflowSitemapStatus.className = 'info-value success';
+
+      setTimeout(() => {
+        refreshWebflowSitemapBtn.textContent = '🔄 Refresh Webflow Sitemap';
+        refreshWebflowSitemapBtn.disabled = false;
+      }, 3000);
+    } else {
+      throw new Error(result.error);
+    }
+  } catch (error) {
+    alert(`Error: ${error.message}`);
+    refreshWebflowSitemapBtn.textContent = '🔄 Refresh Webflow Sitemap';
+    refreshWebflowSitemapBtn.disabled = false;
+  }
+});
+
+// Start sitemap comparison
+startSitemapCompareBtn.addEventListener('click', async () => {
+  if (sitemapCompareRunning) return;
+
+  const devUrl = sitemapDevUrlInput.value.trim();
+  if (!devUrl) {
+    alert('Please enter Development URL');
+    return;
+  }
+
+  sitemapCompareRunning = true;
+  startSitemapCompareBtn.disabled = true;
+  startSitemapCompareBtn.textContent = 'Running...';
+
+  sitemapProgressSection.style.display = 'block';
+  sitemapResultsSection.style.display = 'none';
+  sitemapProgressLog.innerHTML = '';
+
+  try {
+    const response = await fetch('/api/compare-sitemaps', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ devUrl, socketId: socket.id })
+    });
+
+    const result = await response.json();
+    if (!result.success) {
+      throw new Error(result.error);
+    }
+  } catch (error) {
+    alert(`Error: ${error.message}`);
+    resetSitemapUI();
+  }
+});
+
+// Handle sitemap progress events
+socket.on('sitemap-progress', (data) => {
+  handleSitemapProgress(data);
+});
+
+function handleSitemapProgress(data) {
+  const { type, message, stats, issues } = data;
+
+  switch (type) {
+    case 'start':
+    case 'status':
+      addSitemapLogEntry(message);
+      break;
+
+    case 'complete':
+      addSitemapLogEntry('✅ Comparison complete!', 'success');
+      displaySitemapResults(stats, issues);
+      resetSitemapUI();
+      break;
+
+    case 'error':
+      addSitemapLogEntry(`❌ Error: ${message}`, 'error');
+      resetSitemapUI();
+      break;
+  }
+}
+
+function addSitemapLogEntry(message, type = 'info') {
+  const entry = document.createElement('div');
+  entry.className = `log-entry ${type}`;
+  const timestamp = new Date().toLocaleTimeString();
+  entry.textContent = `[${timestamp}] ${message}`;
+  sitemapProgressLog.appendChild(entry);
+  sitemapProgressLog.scrollTop = sitemapProgressLog.scrollHeight;
+}
+
+function displaySitemapResults(stats, issues, timestamp) {
+  sitemapResultsSection.style.display = 'block';
+
+  const timeAgo = timestamp ? formatTimeAgo(timestamp) : 'Just now';
+
+  sitemapSummaryGrid.innerHTML = `
+    <div class="summary-card info">
+      <h3>📊 Webflow Slugs</h3>
+      <div class="value">${stats.webflowSlugs?.toLocaleString() || 0}</div>
+      <small>Unique pages in prod</small>
+    </div>
+    <div class="summary-card info">
+      <h3>📊 Next.js Slugs</h3>
+      <div class="value">${stats.nextjsSlugs?.toLocaleString() || 0}</div>
+      <small>Unique pages in dev</small>
+    </div>
+    <div class="summary-card success">
+      <h3>✅ Matching</h3>
+      <div class="value">${stats.matchingSlugs?.toLocaleString() || 0}</div>
+      <small>Pages in both</small>
+    </div>
+    <div class="summary-card success">
+      <h3>🎯 Perfect Match</h3>
+      <div class="value">${stats.perfectMatch?.toLocaleString() || 0}</div>
+      <small>All languages match</small>
+    </div>
+    <div class="summary-card error">
+      <h3>❌ Missing in Dev</h3>
+      <div class="value">${issues?.missingInNextjs || 0}</div>
+      <small>Need to migrate</small>
+    </div>
+    <div class="summary-card warning">
+      <h3>ℹ️ New in Dev</h3>
+      <div class="value">${issues?.missingInWebflow || 0}</div>
+      <small>New pages</small>
+    </div>
+    <div class="summary-card warning">
+      <h3>⚠️ Missing Languages</h3>
+      <div class="value">${issues?.missingLanguages || 0}</div>
+      <small>Need translations</small>
+    </div>
+    <div class="summary-card" style="grid-column: 1 / -1;">
+      <h3>🕐 Last Generated</h3>
+      <div class="value" style="font-size: 1.2rem;">${timeAgo}</div>
+      <small>${timestamp ? new Date(timestamp).toLocaleString() : 'Just now'}</small>
+    </div>
+  `;
+
+  sitemapHtmlReportLink.href = `/result/sitemap-comparison.html?t=${Date.now()}`;
+}
+
+function resetSitemapUI() {
+  sitemapCompareRunning = false;
+  startSitemapCompareBtn.disabled = false;
+  startSitemapCompareBtn.textContent = 'Start Comparison';
+}
+
+// Initialize sitemap tab
+checkWebflowSitemap();
