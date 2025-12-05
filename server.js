@@ -44,9 +44,23 @@ async function fetchPageData(baseUrl, path, checks) {
 
   try {
     const url = `${baseUrl}${adjustedPath}`;
+
+    // Track redirects
+    let redirected = false;
+    let redirectUrl = null;
+    let originalStatus = null;
+
     const response = await axios.get(url, {
       timeout: 10000,
-      headers: { 'User-Agent': 'Coursebox-Migration-Parser/1.0' }
+      headers: { 'User-Agent': 'Coursebox-Migration-Parser/1.0' },
+      maxRedirects: 5,
+      beforeRedirect: (options, { headers, statusCode }) => {
+        if (!redirected) {
+          redirected = true;
+          originalStatus = statusCode;
+          redirectUrl = options.href;
+        }
+      }
     });
 
     const $ = cheerio.load(response.data);
@@ -83,7 +97,10 @@ async function fetchPageData(baseUrl, path, checks) {
       h1,
       ogImage,
       status: response.status,
-      error: null
+      error: null,
+      redirected,
+      redirectStatus: originalStatus,
+      redirectUrl: redirectUrl ? new URL(redirectUrl).pathname : null
     };
   } catch (error) {
     return {
@@ -93,7 +110,10 @@ async function fetchPageData(baseUrl, path, checks) {
       h1: '',
       ogImage: '',
       status: error.response?.status || 0,
-      error: error.message
+      error: error.message,
+      redirected: false,
+      redirectStatus: null,
+      redirectUrl: null
     };
   }
 }
@@ -127,11 +147,35 @@ function comparePages(prodData, devData, checks) {
   let notes = [];
   let diffCount = 0;
 
+  // Check for redirects
+  const prodRedirect = prodData.redirected ? `${prodData.redirectStatus} → ${prodData.redirectUrl}` : null;
+  const devRedirect = devData.redirected ? `${devData.redirectStatus} → ${devData.redirectUrl}` : null;
+
   if (!bothOk) {
     status = 'ERROR';
-    if (prodData.status !== 200) notes.push(`Prod: ${prodData.status}`);
-    if (devData.status !== 200) notes.push(`Dev: ${devData.status}`);
+    if (prodData.status !== 200) {
+      if (prodData.redirected) {
+        notes.push(`Prod: ${prodData.redirectStatus} redirect → ${prodData.redirectUrl}`);
+      } else {
+        notes.push(`Prod: ${prodData.status}`);
+      }
+    }
+    if (devData.status !== 200) {
+      if (devData.redirected) {
+        notes.push(`Dev: ${devData.redirectStatus} redirect → ${devData.redirectUrl}`);
+      } else {
+        notes.push(`Dev: ${devData.status}`);
+      }
+    }
   } else {
+    // Add redirect info even when status is 200 (redirect followed successfully)
+    if (prodData.redirected) {
+      notes.push(`Prod redirected: ${prodData.redirectStatus} → ${prodData.redirectUrl}`);
+    }
+    if (devData.redirected) {
+      notes.push(`Dev redirected: ${devData.redirectStatus} → ${devData.redirectUrl}`);
+    }
+
     if (checks.title && !titleMatch) { notes.push('Title'); diffCount++; }
     if (checks.description && !descMatch) { notes.push('Description'); diffCount++; }
     if (checks.h1 && !h1Match) { notes.push('H1'); diffCount++; }
@@ -171,7 +215,13 @@ function comparePages(prodData, devData, checks) {
     prodStatus: prodData.status,
     devStatus: devData.status,
     prodError: prodData.error || '',
-    devError: devData.error || ''
+    devError: devData.error || '',
+    prodRedirected: prodData.redirected || false,
+    prodRedirectStatus: prodData.redirectStatus || null,
+    prodRedirectUrl: prodData.redirectUrl || null,
+    devRedirected: devData.redirected || false,
+    devRedirectStatus: devData.redirectStatus || null,
+    devRedirectUrl: devData.redirectUrl || null
   };
 }
 
@@ -222,7 +272,9 @@ async function generateCsvReport(results, checks) {
 
   headers.push(
     { id: 'prodStatus', title: 'Prod HTTP' },
-    { id: 'devStatus', title: 'Dev HTTP' }
+    { id: 'devStatus', title: 'Dev HTTP' },
+    { id: 'prodRedirectUrl', title: 'Prod Redirect To' },
+    { id: 'devRedirectUrl', title: 'Dev Redirect To' }
   );
 
   // Main report (all languages)
@@ -452,6 +504,26 @@ function generatePageRow(r, checks, prodUrl, devUrl) {
   const prodFullUrl = `${prodUrl}${r.url}`;
   const devFullUrl = `${devUrl}${devPath}`;
 
+  // Build redirect info badges
+  let prodRedirectBadge = '';
+  let devRedirectBadge = '';
+
+  if (r.prodRedirected) {
+    prodRedirectBadge = `
+      <div style="margin-top: 4px; padding: 4px 8px; background: #fff3cd; border-radius: 4px; font-size: 11px; border-left: 3px solid #ffc107;">
+        ↪️ <strong>Prod ${r.prodRedirectStatus}</strong> → ${r.prodRedirectUrl}
+      </div>
+    `;
+  }
+
+  if (r.devRedirected) {
+    devRedirectBadge = `
+      <div style="margin-top: 4px; padding: 4px 8px; background: #cce5ff; border-radius: 4px; font-size: 11px; border-left: 3px solid #007bff;">
+        ↪️ <strong>Dev ${r.devRedirectStatus}</strong> → ${r.devRedirectUrl}
+      </div>
+    `;
+  }
+
   // Add locale badge and clickable links
   const localeLabel = r.locale === 'en' ? '🇬🇧 EN' : `🌍 ${r.locale.toUpperCase()}`;
   const urlDisplay = `
@@ -467,6 +539,8 @@ function generatePageRow(r, checks, prodUrl, devUrl) {
         🔗 Dev
       </a>
     </div>
+    ${prodRedirectBadge}
+    ${devRedirectBadge}
   `;
 
   const htmlRows = elementRows.map((rowContent, index) => {
@@ -701,17 +775,19 @@ async function runParser(config, socket) {
   const { prodUrl, devUrl, urls, checks } = config;
   const results = [];
   const socketId = socket.id;
+  const BATCH_SIZE = config.batchSize || 5;
+  const DELAY_BETWEEN_BATCHES = 500;
 
   activeParsingJobs.set(socketId, { stopped: false });
 
   socket.emit('progress', {
     type: 'start',
     total: urls.length,
-    message: `Starting comparison of ${urls.length} URLs...`
+    message: `Starting comparison of ${urls.length} URLs (${BATCH_SIZE} parallel requests)...`
   });
 
   try {
-    for (let i = 0; i < urls.length; i++) {
+    for (let batchStart = 0; batchStart < urls.length; batchStart += BATCH_SIZE) {
       const job = activeParsingJobs.get(socketId);
       if (job && job.stopped) {
         socket.emit('progress', {
@@ -719,48 +795,46 @@ async function runParser(config, socket) {
           message: 'Parser stopped by user'
         });
         activeParsingJobs.delete(socketId);
-        return { stopped: true };
+        return { stopped: true, results };
       }
 
-      const url = urls[i];
+      const batchEnd = Math.min(batchStart + BATCH_SIZE, urls.length);
+      const batchUrls = urls.slice(batchStart, batchEnd);
 
       socket.emit('progress', {
         type: 'fetching',
-        current: i + 1,
+        current: batchStart + 1,
         total: urls.length,
-        url,
-        message: `[${i + 1}/${urls.length}] Fetching: ${url}`
+        batchSize: batchUrls.length,
+        message: `[${batchStart + 1}-${batchEnd}/${urls.length}] Fetching batch of ${batchUrls.length} URLs...`
       });
 
-      const prodData = await fetchPageData(prodUrl, url, checks);
-      await delay(1000);
-
-      if (activeParsingJobs.get(socketId)?.stopped) {
-        socket.emit('progress', { type: 'stopped', message: 'Parser stopped by user' });
-        activeParsingJobs.delete(socketId);
-        return { stopped: true };
-      }
-
-      const devData = await fetchPageData(devUrl, url, checks);
-      await delay(1000);
-
-      if (activeParsingJobs.get(socketId)?.stopped) {
-        socket.emit('progress', { type: 'stopped', message: 'Parser stopped by user' });
-        activeParsingJobs.delete(socketId);
-        return { stopped: true };
-      }
-
-      const comparison = comparePages(prodData, devData, checks);
-      results.push(comparison);
-
-      socket.emit('progress', {
-        type: 'compared',
-        current: i + 1,
-        total: urls.length,
-        url,
-        status: comparison.status,
-        message: `[${i + 1}/${urls.length}] ${url} - ${comparison.status}`
+      const batchPromises = batchUrls.map(async (url) => {
+        const [prodData, devData] = await Promise.all([
+          fetchPageData(prodUrl, url, checks),
+          fetchPageData(devUrl, url, checks)
+        ]);
+        return comparePages(prodData, devData, checks);
       });
+
+      const batchResults = await Promise.all(batchPromises);
+      results.push(...batchResults);
+
+      for (let i = 0; i < batchResults.length; i++) {
+        const comparison = batchResults[i];
+        socket.emit('progress', {
+          type: 'compared',
+          current: batchStart + i + 1,
+          total: urls.length,
+          url: batchUrls[i],
+          status: comparison.status,
+          message: `[${batchStart + i + 1}/${urls.length}] ${batchUrls[i]} - ${comparison.status}`
+        });
+      }
+
+      if (batchEnd < urls.length) {
+        await delay(DELAY_BETWEEN_BATCHES);
+      }
     }
 
     socket.emit('progress', {
@@ -822,7 +896,7 @@ app.post('/api/parse', async (req, res) => {
       return res.status(400).json({ error: 'Socket connection not found' });
     }
 
-    runParser({ prodUrl, devUrl, urls, checks }, socket)
+    runParser({ prodUrl, devUrl, urls, checks, batchSize: 10 }, socket)
       .catch(error => {
         socket.emit('progress', {
           type: 'error',
