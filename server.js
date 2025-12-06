@@ -42,13 +42,13 @@ async function fetchPageData(baseUrl, path, checks) {
   const isDev = baseUrl.includes('vercel.app');
   const adjustedPath = isDev ? adjustUrlForDev(path) : path;
 
+  // Track redirects (shared between try/catch)
+  let redirected = false;
+  let redirectUrl = null;
+  let originalStatus = null;
+
   try {
     const url = `${baseUrl}${adjustedPath}`;
-
-    // Track redirects
-    let redirected = false;
-    let redirectUrl = null;
-    let originalStatus = null;
 
     const response = await axios.get(url, {
       timeout: 10000,
@@ -103,6 +103,16 @@ async function fetchPageData(baseUrl, path, checks) {
       redirectUrl: redirectUrl ? new URL(redirectUrl).pathname : null
     };
   } catch (error) {
+    // Check if redirect happened before error (e.g., redirect to 404 page)
+    let finalRedirectUrl = null;
+    if (redirected && redirectUrl) {
+      try {
+        finalRedirectUrl = new URL(redirectUrl).pathname;
+      } catch {
+        finalRedirectUrl = redirectUrl;
+      }
+    }
+
     return {
       url: path,
       title: '',
@@ -111,9 +121,9 @@ async function fetchPageData(baseUrl, path, checks) {
       ogImage: '',
       status: error.response?.status || 0,
       error: error.message,
-      redirected: false,
-      redirectStatus: null,
-      redirectUrl: null
+      redirected,
+      redirectStatus: originalStatus,
+      redirectUrl: finalRedirectUrl
     };
   }
 }
@@ -349,9 +359,10 @@ function generateHtmlReport(results, prodUrl, devUrl, checks) {
 
 /**
  * Group results by page type (using sitemap-based mapping)
+ * Groups pages by their EN version URL
  */
 function groupByPageType(results) {
-  const LOCALES = ['en', 'ar', 'fr', 'de', 'es', 'it', 'pt', 'zh', 'ko', 'ja', 'nl'];
+  const LOCALES = ['ar', 'fr', 'de', 'es', 'it', 'pt', 'zh', 'ko', 'ja', 'nl'];
   const groups = new Map();
 
   // Load pages mapping (sitemap-based)
@@ -365,30 +376,46 @@ function groupByPageType(results) {
     console.warn('Warning: Could not load pages-mapping.json, using fallback grouping');
   }
 
+  // First pass: collect all EN pages
+  const enPages = new Set();
   for (const result of results) {
-    // Определяем базовый URL из маппинга (если есть)
-    let basePath = pagesMapping[result.url] || result.url;
-
-    // Fallback: если маппинга нет, используем старую логику
-    if (!pagesMapping[result.url]) {
-      for (const loc of LOCALES) {
-        if (result.url === `/${loc}`) {
-          basePath = '/';
-          break;
-        } else if (result.url.startsWith(`/${loc}/`)) {
-          basePath = result.url.substring(loc.length + 1); // Remove /{locale}
-          break;
-        }
-      }
+    const url = result.url;
+    const isLocalized = LOCALES.some(loc => url === `/${loc}` || url.startsWith(`/${loc}/`));
+    if (!isLocalized) {
+      enPages.add(url);
     }
+  }
+
+  for (const result of results) {
+    const url = result.url;
 
     // Определяем локаль
     let locale = 'en';
+    let basePath = url;
+
     for (const loc of LOCALES) {
-      if (result.url === `/${loc}` || result.url.startsWith(`/${loc}/`)) {
+      if (url === `/${loc}`) {
         locale = loc;
+        basePath = '/';
+        break;
+      } else if (url.startsWith(`/${loc}/`)) {
+        locale = loc;
+        // Extract path without locale prefix
+        const pathWithoutLocale = url.substring(loc.length + 2); // Remove /{locale}/
+        basePath = `/${pathWithoutLocale}`;
         break;
       }
+    }
+
+    // Use mapping if available
+    if (pagesMapping[url]) {
+      basePath = pagesMapping[url];
+    }
+
+    // If no EN version exists for this basePath, use the localized URL as group key
+    if (!enPages.has(basePath) && locale !== 'en') {
+      // Keep the localized URL as basePath if no EN equivalent
+      basePath = url;
     }
 
     if (!groups.has(basePath)) {
@@ -413,12 +440,13 @@ function generateGroupedRows(groupedResults, checks, prodUrl, devUrl) {
     const pageCount = pageResults.length;
 
     // Group header
+    const prodLink = `${prodUrl}${basePath}`;
     html += `
       <tr class="group-header">
         <td colspan="6">
-          <h3 style="margin: 0; padding: 10px 0;">
-            📄 ${pageTitle}
-            <span style="font-size: 14px; font-weight: normal; color: #666;">
+          <h3 style="margin: 0; padding: 10px 0; color: #fafafa;">
+            📄 <a href="${prodLink}" target="_blank" style="color: #3b82f6; text-decoration: none; border-bottom: 1px dashed #3f3f46;">${pageTitle}</a>
+            <span style="font-size: 14px; font-weight: normal;">
               (${pageCount} language${pageCount > 1 ? 's' : ''})
             </span>
           </h3>
@@ -446,8 +474,8 @@ function generateGroupedRows(groupedResults, checks, prodUrl, devUrl) {
  * Generate HTML row for a single page result
  */
 function generatePageRow(r, checks, prodUrl, devUrl) {
-  const statusColor = r.status === 'OK' ? 'green' : r.status === 'DIFF' ? 'orange' : 'red';
-  const bgColor = r.status === 'DIFF' ? '#fff3cd' : r.status === 'ERROR' ? '#f8d7da' : '#d4edda';
+  const statusColor = r.status === 'OK' ? '#22c55e' : r.status === 'DIFF' ? '#f59e0b' : '#ef4444';
+  const bgColor = r.status === 'DIFF' ? 'rgba(245, 158, 11, 0.25)' : r.status === 'ERROR' ? 'rgba(239, 68, 68, 0.25)' : 'rgba(34, 197, 94, 0.15)';
 
   const elementRows = [];
 
@@ -510,7 +538,7 @@ function generatePageRow(r, checks, prodUrl, devUrl) {
 
   if (r.prodRedirected) {
     prodRedirectBadge = `
-      <div style="margin-top: 4px; padding: 4px 8px; background: #fff3cd; border-radius: 4px; font-size: 11px; border-left: 3px solid #ffc107;">
+      <div style="margin-top: 4px; padding: 4px 8px; background: rgba(245, 158, 11, 0.2); border-radius: 4px; font-size: 11px; border-left: 3px solid #f59e0b; color: #fafafa;">
         ↪️ <strong>Prod ${r.prodRedirectStatus}</strong> → ${r.prodRedirectUrl}
       </div>
     `;
@@ -518,7 +546,7 @@ function generatePageRow(r, checks, prodUrl, devUrl) {
 
   if (r.devRedirected) {
     devRedirectBadge = `
-      <div style="margin-top: 4px; padding: 4px 8px; background: #cce5ff; border-radius: 4px; font-size: 11px; border-left: 3px solid #007bff;">
+      <div style="margin-top: 4px; padding: 4px 8px; background: rgba(59, 130, 246, 0.2); border-radius: 4px; font-size: 11px; border-left: 3px solid #3b82f6; color: #fafafa;">
         ↪️ <strong>Dev ${r.devRedirectStatus}</strong> → ${r.devRedirectUrl}
       </div>
     `;
@@ -529,13 +557,13 @@ function generatePageRow(r, checks, prodUrl, devUrl) {
   const urlDisplay = `
     <div style="margin-bottom: 8px;">
       <strong>${r.url}</strong>
-      <span class="locale-badge" style="background: #e0e0e0; padding: 2px 6px; border-radius: 3px; font-size: 11px; margin-left: 8px;">${localeLabel}</span>
+      <span class="locale-badge" style="background: #3f3f46; color: #a1a1aa; padding: 2px 6px; border-radius: 3px; font-size: 11px; margin-left: 8px;">${localeLabel}</span>
     </div>
     <div style="display: flex; gap: 8px; margin-top: 4px;">
-      <a href="${prodFullUrl}" target="_blank" style="background: #4CAF50; color: white; padding: 4px 10px; border-radius: 4px; text-decoration: none; font-size: 11px;">
+      <a href="${prodFullUrl}" target="_blank" style="background: #22c55e; color: #0a0a0b; padding: 4px 10px; border-radius: 4px; text-decoration: none; font-size: 11px; font-weight: 500;">
         🔗 Prod
       </a>
-      <a href="${devFullUrl}" target="_blank" style="background: #2196F3; color: white; padding: 4px 10px; border-radius: 4px; text-decoration: none; font-size: 11px;">
+      <a href="${devFullUrl}" target="_blank" style="background: #3b82f6; color: white; padding: 4px 10px; border-radius: 4px; text-decoration: none; font-size: 11px; font-weight: 500;">
         🔗 Dev
       </a>
     </div>
@@ -564,9 +592,9 @@ function generatePageRow(r, checks, prodUrl, devUrl) {
 
   return `
     ${htmlRows}
-    <tr style="border-bottom: 2px solid #333;">
-      <td colspan="6" style="padding: 8px; background-color: #f8f9fa;">
-        <strong>Differences:</strong> ${r.notes}
+    <tr style="border-bottom: 2px solid #3f3f46;">
+      <td colspan="6" style="padding: 8px; background-color: #18181b; color: #a1a1aa;">
+        <strong style="color: #fafafa;">Differences:</strong> ${r.notes}
       </td>
     </tr>
   `;
@@ -584,48 +612,75 @@ function generateHtmlTemplate(results, rows, prodUrl, devUrl, checks) {
   <meta charset="UTF-8">
   <title>Coursebox Site Comparison Report</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; font-size: 14px; }
-    h1 { color: #333; }
-    table { border-collapse: collapse; width: 100%; margin-top: 20px; background: white; font-size: 13px; }
-    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; word-wrap: break-word; }
-    th { background-color: #4CAF50; color: white; position: sticky; top: 0; font-size: 14px; }
-    td { max-width: 300px; }
-    .summary { background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    /* Dark theme - based on Nilux Transcriber */
+    :root {
+      --bg-primary: #0a0a0b;
+      --bg-secondary: #111113;
+      --bg-tertiary: #18181b;
+      --bg-elevated: #1f1f23;
+      --border-subtle: #27272a;
+      --border-default: #3f3f46;
+      --text-primary: #fafafa;
+      --text-secondary: #a1a1aa;
+      --text-tertiary: #71717a;
+      --accent-primary: #3b82f6;
+      --accent-success: #22c55e;
+      --accent-warning: #f59e0b;
+      --accent-error: #ef4444;
+    }
+
+    body { font-family: Arial, sans-serif; margin: 20px; background: var(--bg-primary); color: var(--text-primary); font-size: 14px; }
+    h1 { color: var(--text-primary); }
+    h3 { color: var(--text-secondary); }
+    table { border-collapse: collapse; width: 100%; margin-top: 20px; background: var(--bg-secondary); font-size: 13px; }
+    th, td { border: 1px solid var(--border-subtle); padding: 8px; text-align: left; word-wrap: break-word; }
+    th { background-color: var(--accent-primary); color: white; position: sticky; top: 0; font-size: 14px; }
+    td { max-width: 300px; color: var(--text-primary); }
+    .summary { background: var(--bg-secondary); padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid var(--border-subtle); }
     .summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-top: 15px; }
-    .summary-item { padding: 10px; border-left: 4px solid #4CAF50; background: #f9f9f9; }
-    .summary-item.warning { border-left-color: orange; }
-    .summary-item.error { border-left-color: red; }
+    .summary-item { padding: 10px; border-left: 4px solid var(--accent-success); background: var(--bg-tertiary); border-radius: 0 6px 6px 0; }
+    .summary-item h4 { color: var(--text-primary); margin: 0 0 5px 0; }
+    .summary-item p { color: var(--text-primary); }
+    .summary-item small { color: var(--text-tertiary); }
+    .summary-item.warning { border-left-color: var(--accent-warning); }
+    .summary-item.error { border-left-color: var(--accent-error); }
+    .summary p { color: var(--text-secondary); margin: 5px 0; }
+    .summary strong { color: var(--text-primary); }
+    hr { border: none; border-top: 1px solid var(--border-subtle); }
     .url-cell { font-weight: bold; vertical-align: top; }
     .status-cell { font-weight: bold; text-align: center; vertical-align: top; }
     .label-cell { font-weight: bold; }
-    .small-text { font-size: 11px; color: #666; }
-    .match-cell { background-color: #d4edda !important; border-left: 3px solid #28a745 !important; }
-    .diff-cell { background-color: #ffe6e6 !important; border-left: 3px solid #ff4444 !important; }
-    .migration-cell { background-color: #fff3cd !important; border-left: 3px solid #ffa500 !important; }
-    .group-header { background-color: #f0f0f0; font-weight: bold; }
-    .group-header td { border-top: 3px solid #333 !important; padding: 15px 10px !important; }
+    .small-text { font-size: 11px; color: #fff !important; }
+    .match-cell { background-color: rgba(34, 197, 94, 0.2) !important; border-left: 3px solid var(--accent-success) !important; }
+    .diff-cell { background-color: rgba(239, 68, 68, 0.3) !important; border-left: 3px solid var(--accent-error) !important; }
+    .migration-cell { background-color: rgba(245, 158, 11, 0.3) !important; border-left: 3px solid var(--accent-warning) !important; color: #fff !important; }
+    .group-header { background-color: var(--bg-tertiary); font-weight: bold; }
+    .group-header td { border-top: 3px solid var(--border-default) !important; padding: 15px 10px !important; }
+    .group-header a { color: var(--accent-primary); }
+    .group-header a:hover { color: #60a5fa; }
 
     /* Filter buttons */
     .filter-buttons { margin: 15px 0; display: flex; gap: 10px; flex-wrap: wrap; }
     .filter-btn {
       padding: 10px 20px;
-      border: 2px solid #ddd;
+      border: 2px solid var(--border-default);
       border-radius: 6px;
       cursor: pointer;
       font-size: 14px;
       font-weight: bold;
       transition: all 0.2s;
+      background: var(--bg-tertiary);
+      color: var(--text-secondary);
     }
-    .filter-btn:hover { transform: translateY(-2px); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+    .filter-btn:hover { transform: translateY(-2px); box-shadow: 0 2px 8px rgba(0,0,0,0.3); background: var(--bg-elevated); }
     .filter-btn.active { border-width: 3px; }
-    .filter-btn[data-filter="all"] { background: #f0f0f0; }
-    .filter-btn[data-filter="all"].active { background: #333; color: white; border-color: #333; }
-    .filter-btn[data-filter="OK"] { background: #d4edda; color: #155724; }
-    .filter-btn[data-filter="OK"].active { background: #28a745; color: white; border-color: #28a745; }
-    .filter-btn[data-filter="DIFF"] { background: #fff3cd; color: #856404; }
-    .filter-btn[data-filter="DIFF"].active { background: #ffc107; color: #333; border-color: #ffc107; }
-    .filter-btn[data-filter="ERROR"] { background: #f8d7da; color: #721c24; }
-    .filter-btn[data-filter="ERROR"].active { background: #dc3545; color: white; border-color: #dc3545; }
+    .filter-btn[data-filter="all"].active { background: var(--bg-elevated); color: var(--text-primary); border-color: var(--text-primary); }
+    .filter-btn[data-filter="OK"] { background: rgba(34, 197, 94, 0.15); color: var(--accent-success); border-color: var(--accent-success); }
+    .filter-btn[data-filter="OK"].active { background: var(--accent-success); color: var(--bg-primary); }
+    .filter-btn[data-filter="DIFF"] { background: rgba(245, 158, 11, 0.15); color: var(--accent-warning); border-color: var(--accent-warning); }
+    .filter-btn[data-filter="DIFF"].active { background: var(--accent-warning); color: var(--bg-primary); }
+    .filter-btn[data-filter="ERROR"] { background: rgba(239, 68, 68, 0.15); color: var(--accent-error); border-color: var(--accent-error); }
+    .filter-btn[data-filter="ERROR"].active { background: var(--accent-error); color: white; }
 
     /* Hidden rows */
     tr.hidden { display: none; }
@@ -633,6 +688,16 @@ function generateHtmlTemplate(results, rows, prodUrl, devUrl, checks) {
 
     /* Filter counter */
     .filter-count { font-size: 12px; margin-left: 5px; opacity: 0.8; }
+
+    /* Links */
+    a { color: var(--accent-primary); }
+    a:hover { color: #60a5fa; }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--border-subtle); }
   </style>
 </head>
 <body>
@@ -643,17 +708,17 @@ function generateHtmlTemplate(results, rows, prodUrl, devUrl, checks) {
     <div class="summary-grid">
       <div class="summary-item">
         <h4>✅ Perfect Match</h4>
-        <p style="font-size: 24px; margin: 5px 0;">${results.filter(r => r.status === 'OK').length}</p>
+        <p style="font-size: 24px; margin: 5px 0; color: #fff !important;">${results.filter(r => r.status === 'OK').length}</p>
         <small>All elements identical</small>
       </div>
       <div class="summary-item warning">
         <h4>⚠️ Differences Found</h4>
-        <p style="font-size: 24px; margin: 5px 0;">${results.filter(r => r.status === 'DIFF').length}</p>
+        <p style="font-size: 24px; margin: 5px 0; color: #fff !important;">${results.filter(r => r.status === 'DIFF').length}</p>
         <small>Some elements differ</small>
       </div>
       <div class="summary-item error">
         <h4>❌ Errors</h4>
-        <p style="font-size: 24px; margin: 5px 0;">${results.filter(r => r.status === 'ERROR').length}</p>
+        <p style="font-size: 24px; margin: 5px 0; color: #fff !important;">${results.filter(r => r.status === 'ERROR').length}</p>
         <small>Pages unavailable</small>
       </div>
     </div>
@@ -896,7 +961,7 @@ app.post('/api/parse', async (req, res) => {
       return res.status(400).json({ error: 'Socket connection not found' });
     }
 
-    runParser({ prodUrl, devUrl, urls, checks, batchSize: 10 }, socket)
+    runParser({ prodUrl, devUrl, urls, checks, batchSize: 20 }, socket)
       .catch(error => {
         socket.emit('progress', {
           type: 'error',
@@ -1053,6 +1118,7 @@ app.post('/api/sitemap', async (req, res) => {
     // Parse XML
     const $ = cheerio.load(xml, { xmlMode: true });
     const urlsSet = new Set(); // Use Set to avoid duplicates
+    const pagesMapping = {}; // Map: localized URL -> EN URL
 
     // Extract URLs from <loc> and hreflang <link> tags
     $('url').each((_, urlNode) => {
@@ -1062,16 +1128,54 @@ app.post('/api/sitemap', async (req, res) => {
       const mainLoc = $url.find('loc').text().trim();
       if (mainLoc) urlsSet.add(mainLoc);
 
+      // Find EN version URL (hreflang="en") - use xhtml\:link selector for namespaced tags
+      let enUrl = null;
+      $url.find('xhtml\\:link').each((_, link) => {
+        const hreflang = $(link).attr('hreflang');
+        const href = $(link).attr('href');
+        if (hreflang === 'en' && href) {
+          try {
+            const parsed = new URL(href);
+            enUrl = parsed.pathname === '/' ? '/' : parsed.pathname.replace(/\/$/, '');
+          } catch (e) {
+            // Invalid URL, skip
+          }
+        }
+      });
+
       // All <xhtml:link rel="alternate" hreflang="..."> tags
-      $url.find('link[rel="alternate"]').each((_, link) => {
+      $url.find('xhtml\\:link').each((_, link) => {
         const href = $(link).attr('href');
         const hreflang = $(link).attr('hreflang');
         // Skip x-default, only add actual language versions
         if (href && hreflang && hreflang !== 'x-default') {
           urlsSet.add(href);
+
+          // Build mapping: localized URL -> EN URL (skip excluded paths)
+          if (enUrl && hreflang !== 'en') {
+            try {
+              const parsed = new URL(href);
+              const localizedPath = parsed.pathname === '/' ? '/' : parsed.pathname.replace(/\/$/, '');
+
+              // Skip excluded paths (blog, rto-materials, alternatives)
+              const isExcluded = EXCLUDED_PATHS.some(ex => localizedPath.includes(ex) || enUrl.includes(ex));
+
+              // Only add if paths differ (localized slug) and not excluded
+              if (localizedPath !== enUrl && !isExcluded) {
+                pagesMapping[localizedPath] = enUrl;
+              }
+            } catch (e) {
+              // Invalid URL, skip
+            }
+          }
         }
       });
     });
+
+    // Save pages-mapping.json
+    const mappingPath = path.join(__dirname, 'pages-mapping.json');
+    fs.writeFileSync(mappingPath, JSON.stringify(pagesMapping, null, 2), 'utf-8');
+    console.log(`Saved pages-mapping.json with ${Object.keys(pagesMapping).length} mappings`);
 
     const urls = Array.from(urlsSet);
     console.log(`Found ${urls.length} URLs in sitemap (including all translations)`);
@@ -1127,7 +1231,8 @@ app.post('/api/sitemap', async (req, res) => {
       success: true,
       count: filtered.length,
       total: urls.length,
-      templates: templateExamples.size
+      templates: templateExamples.size,
+      mappings: Object.keys(pagesMapping).length
     });
   } catch (error) {
     console.error('Sitemap parse error:', error.message);
