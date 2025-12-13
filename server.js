@@ -389,7 +389,6 @@ function groupByPageType(results) {
   for (const result of results) {
     const url = result.url;
 
-    // Определяем локаль
     let locale = 'en';
     let basePath = url;
 
@@ -961,7 +960,7 @@ app.post('/api/parse', async (req, res) => {
       return res.status(400).json({ error: 'Socket connection not found' });
     }
 
-    runParser({ prodUrl, devUrl, urls, checks, batchSize: 20 }, socket)
+    runParser({ prodUrl, devUrl, urls, checks, batchSize: 8 }, socket)
       .catch(error => {
         socket.emit('progress', {
           type: 'error',
