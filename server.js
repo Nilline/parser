@@ -28,6 +28,7 @@ const PORT = process.env.PORT || 3001;
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 const activeParsingJobs = new Map();
+const activeWarmupJobs = new Map();
 
 /**
  * Adjust URL for Dev environment
@@ -835,6 +836,281 @@ function generateHtmlTemplate(results, rows, prodUrl, devUrl, checks) {
   return html;
 }
 
+/**
+ * Fetch page for cache warmup (only status and timing)
+ */
+async function fetchPageForWarmup(baseUrl, path) {
+  const startTime = Date.now();
+
+  try {
+    const url = `${baseUrl}${path}`;
+
+    const response = await axios.get(url, {
+      timeout: 15000,
+      headers: { 'User-Agent': 'Coursebox-Cache-Warmup/1.0' },
+      maxRedirects: 5
+    });
+
+    const duration = Date.now() - startTime;
+
+    return {
+      url: path,
+      status: response.status,
+      duration,
+      error: null,
+      cached: response.headers['x-vercel-cache'] || response.headers['cf-cache-status'] || 'unknown'
+    };
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    return {
+      url: path,
+      status: error.response?.status || 0,
+      duration,
+      error: error.message,
+      cached: 'error'
+    };
+  }
+}
+
+/**
+ * Generate warmup CSV report
+ */
+async function generateWarmupCsvReport(results, baseUrl) {
+  const resultDir = path.join(__dirname, 'result');
+  if (!fs.existsSync(resultDir)) {
+    fs.mkdirSync(resultDir, { recursive: true });
+  }
+
+  const csvWriter = createObjectCsvWriter({
+    path: path.join(resultDir, 'warmup-report.csv'),
+    header: [
+      { id: 'url', title: 'URL' },
+      { id: 'status', title: 'HTTP Status' },
+      { id: 'duration', title: 'Duration (ms)' },
+      { id: 'cached', title: 'Cache Status' },
+      { id: 'error', title: 'Error' }
+    ]
+  });
+
+  await csvWriter.writeRecords(results);
+}
+
+/**
+ * Generate warmup HTML report
+ */
+function generateWarmupHtmlReport(results, baseUrl, stats) {
+  const resultDir = path.join(__dirname, 'result');
+  if (!fs.existsSync(resultDir)) {
+    fs.mkdirSync(resultDir, { recursive: true });
+  }
+
+  const rows = results.map(r => {
+    const statusColor = r.status === 200 ? '#22c55e' : '#ef4444';
+    const bgColor = r.status === 200 ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.25)';
+    const durationColor = r.duration < 500 ? '#22c55e' : r.duration < 1500 ? '#f59e0b' : '#ef4444';
+
+    return `
+      <tr style="background-color: ${bgColor}">
+        <td>
+          <a href="${baseUrl}${r.url}" target="_blank" style="color: #3b82f6;">${r.url}</a>
+        </td>
+        <td style="color: ${statusColor}; font-weight: bold; text-align: center;">${r.status}</td>
+        <td style="color: ${durationColor}; text-align: right;">${r.duration}ms</td>
+        <td style="text-align: center;">${r.cached}</td>
+        <td style="color: #ef4444;">${r.error || ''}</td>
+      </tr>
+    `;
+  }).join('');
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Cache Warmup Report - ${baseUrl}</title>
+  <style>
+    :root {
+      --bg-primary: #0a0a0b;
+      --bg-secondary: #111113;
+      --bg-tertiary: #18181b;
+      --border-subtle: #27272a;
+      --text-primary: #fafafa;
+      --text-secondary: #a1a1aa;
+      --accent-primary: #3b82f6;
+      --accent-success: #22c55e;
+      --accent-warning: #f59e0b;
+      --accent-error: #ef4444;
+    }
+    body { font-family: Arial, sans-serif; margin: 20px; background: var(--bg-primary); color: var(--text-primary); }
+    h1 { color: var(--text-primary); }
+    table { border-collapse: collapse; width: 100%; margin-top: 20px; background: var(--bg-secondary); }
+    th, td { border: 1px solid var(--border-subtle); padding: 8px; text-align: left; }
+    th { background-color: var(--accent-primary); color: white; position: sticky; top: 0; }
+    .summary { background: var(--bg-secondary); padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid var(--border-subtle); }
+    .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-top: 15px; }
+    .summary-item { padding: 10px; border-left: 4px solid var(--accent-success); background: var(--bg-tertiary); border-radius: 0 6px 6px 0; }
+    .summary-item h4 { color: var(--text-primary); margin: 0 0 5px 0; }
+    .summary-item p { font-size: 24px; margin: 5px 0; color: #fff; }
+    .summary-item small { color: var(--text-secondary); }
+    .summary-item.warning { border-left-color: var(--accent-warning); }
+    .summary-item.error { border-left-color: var(--accent-error); }
+    a { color: var(--accent-primary); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <h1>🔥 Cache Warmup Report</h1>
+
+  <div class="summary">
+    <h3>📊 Summary</h3>
+    <div class="summary-grid">
+      <div class="summary-item">
+        <h4>✅ Success (200)</h4>
+        <p>${stats.success}</p>
+        <small>Pages loaded</small>
+      </div>
+      <div class="summary-item error">
+        <h4>❌ Errors</h4>
+        <p>${stats.errors}</p>
+        <small>Failed requests</small>
+      </div>
+      <div class="summary-item warning">
+        <h4>⏱️ Avg Duration</h4>
+        <p>${stats.avgDuration}ms</p>
+        <small>Per page</small>
+      </div>
+      <div class="summary-item">
+        <h4>🕐 Total Time</h4>
+        <p>${Math.round(stats.totalTime / 1000)}s</p>
+        <small>${stats.total} pages</small>
+      </div>
+    </div>
+    <hr style="margin: 15px 0; border: none; border-top: 1px solid var(--border-subtle);">
+    <p><strong>Target URL:</strong> ${baseUrl}</p>
+    <p><strong>Generated:</strong> ${new Date().toLocaleString()}</p>
+  </div>
+
+  <h3>📄 Detailed Results</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>URL</th>
+        <th>Status</th>
+        <th>Duration</th>
+        <th>Cache</th>
+        <th>Error</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rows}
+    </tbody>
+  </table>
+</body>
+</html>
+  `;
+
+  fs.writeFileSync(path.join(resultDir, 'warmup-report.html'), html);
+}
+
+/**
+ * Run cache warmup for a single site
+ */
+async function runWarmup(config, socket) {
+  const { baseUrl, urls } = config;
+  const results = [];
+  const socketId = socket.id;
+  const BATCH_SIZE = config.batchSize || 10;
+  const DELAY_BETWEEN_BATCHES = 200;
+  const startTime = Date.now();
+
+  activeWarmupJobs.set(socketId, { stopped: false });
+
+  socket.emit('warmup-progress', {
+    type: 'start',
+    total: urls.length,
+    message: `Starting cache warmup for ${urls.length} URLs (${BATCH_SIZE} parallel requests)...`
+  });
+
+  try {
+    for (let batchStart = 0; batchStart < urls.length; batchStart += BATCH_SIZE) {
+      const job = activeWarmupJobs.get(socketId);
+      if (job && job.stopped) {
+        socket.emit('warmup-progress', {
+          type: 'stopped',
+          message: 'Warmup stopped by user'
+        });
+        activeWarmupJobs.delete(socketId);
+        return { stopped: true, results };
+      }
+
+      const batchEnd = Math.min(batchStart + BATCH_SIZE, urls.length);
+      const batchUrls = urls.slice(batchStart, batchEnd);
+
+      const batchPromises = batchUrls.map(url => fetchPageForWarmup(baseUrl, url));
+      const batchResults = await Promise.all(batchPromises);
+      results.push(...batchResults);
+
+      // Emit progress for each result
+      for (let i = 0; i < batchResults.length; i++) {
+        const r = batchResults[i];
+        socket.emit('warmup-progress', {
+          type: 'fetched',
+          current: batchStart + i + 1,
+          total: urls.length,
+          url: batchUrls[i],
+          status: r.status,
+          duration: r.duration,
+          message: `[${batchStart + i + 1}/${urls.length}] ${batchUrls[i]} - ${r.status} (${r.duration}ms)`
+        });
+      }
+
+      if (batchEnd < urls.length) {
+        await delay(DELAY_BETWEEN_BATCHES);
+      }
+    }
+
+    const totalTime = Date.now() - startTime;
+    const successResults = results.filter(r => r.status === 200);
+    const errorResults = results.filter(r => r.status !== 200);
+    const avgDuration = Math.round(results.reduce((sum, r) => sum + r.duration, 0) / results.length);
+
+    const stats = {
+      total: results.length,
+      success: successResults.length,
+      errors: errorResults.length,
+      avgDuration,
+      totalTime
+    };
+
+    socket.emit('warmup-progress', {
+      type: 'generating',
+      message: 'Generating warmup reports...'
+    });
+
+    await generateWarmupCsvReport(results, baseUrl);
+    generateWarmupHtmlReport(results, baseUrl, stats);
+
+    // Save summary
+    const resultDir = path.join(__dirname, 'result');
+    fs.writeFileSync(
+      path.join(resultDir, 'warmup-summary.json'),
+      JSON.stringify({ stats, baseUrl, timestamp: new Date().toISOString() }, null, 2)
+    );
+
+    socket.emit('warmup-progress', {
+      type: 'complete',
+      stats,
+      message: `Warmup complete! ${stats.success}/${stats.total} pages loaded in ${Math.round(totalTime/1000)}s`
+    });
+
+    activeWarmupJobs.delete(socketId);
+    return { results, stats };
+  } catch (error) {
+    activeWarmupJobs.delete(socketId);
+    throw error;
+  }
+}
+
 async function runParser(config, socket) {
   const { prodUrl, devUrl, urls, checks } = config;
   const results = [];
@@ -1038,6 +1314,114 @@ app.post('/api/stop', (req, res) => {
     } else {
       res.json({ success: false, message: 'No active parser found' });
     }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// CACHE WARMUP ENDPOINTS
+// ============================================
+
+/**
+ * Start cache warmup for a single site
+ * POST /api/warmup
+ * Body: { baseUrl: "https://www.coursebox.ai", socketId: "..." }
+ */
+app.post('/api/warmup', async (req, res) => {
+  try {
+    const { baseUrl, socketId } = req.body;
+
+    if (!baseUrl) {
+      return res.status(400).json({ error: 'baseUrl is required' });
+    }
+
+    const urlsPath = path.join(__dirname, 'urls-main.txt');
+    if (!fs.existsSync(urlsPath)) {
+      return res.status(400).json({ error: 'URLs file not found. Parse sitemap first.' });
+    }
+
+    const urls = fs.readFileSync(urlsPath, 'utf-8')
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line && !line.startsWith('#'));
+
+    if (urls.length === 0) {
+      return res.status(400).json({ error: 'No URLs found in urls-main.txt' });
+    }
+
+    const socket = io.sockets.sockets.get(socketId);
+    if (!socket) {
+      return res.status(400).json({ error: 'Socket connection not found' });
+    }
+
+    // Check if already running
+    if (activeWarmupJobs.get(socketId)) {
+      return res.status(400).json({ error: 'Warmup already running' });
+    }
+
+    runWarmup({ baseUrl, urls, batchSize: 10 }, socket)
+      .catch(error => {
+        socket.emit('warmup-progress', {
+          type: 'error',
+          message: error.message
+        });
+      });
+
+    res.json({ success: true, message: 'Cache warmup started', urlCount: urls.length });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Stop cache warmup
+ * POST /api/warmup/stop
+ */
+app.post('/api/warmup/stop', (req, res) => {
+  try {
+    const { socketId } = req.body;
+    if (!socketId) {
+      return res.status(400).json({ error: 'socketId is required' });
+    }
+
+    const job = activeWarmupJobs.get(socketId);
+    if (job) {
+      job.stopped = true;
+      res.json({ success: true, message: 'Warmup stopped' });
+    } else {
+      res.json({ success: false, message: 'No active warmup found' });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Get warmup reports info
+ * GET /api/warmup/reports
+ */
+app.get('/api/warmup/reports', (req, res) => {
+  try {
+    const resultDir = path.join(__dirname, 'result');
+    const summaryPath = path.join(resultDir, 'warmup-summary.json');
+    const csvPath = path.join(resultDir, 'warmup-report.csv');
+    const htmlPath = path.join(resultDir, 'warmup-report.html');
+
+    if (!fs.existsSync(summaryPath)) {
+      return res.json({ exists: false });
+    }
+
+    const summary = JSON.parse(fs.readFileSync(summaryPath, 'utf-8'));
+
+    res.json({
+      exists: true,
+      csv: fs.existsSync(csvPath),
+      html: fs.existsSync(htmlPath),
+      timestamp: summary.timestamp,
+      baseUrl: summary.baseUrl,
+      stats: summary.stats
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1396,6 +1780,7 @@ io.on('connection', (socket) => {
     console.log('Client disconnected:', socket.id);
     activeParsingJobs.delete(socket.id);
     activeSitemapJobs.delete(socket.id);
+    activeWarmupJobs.delete(socket.id);
   });
 });
 
