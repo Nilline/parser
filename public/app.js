@@ -606,3 +606,204 @@ function resetSitemapUI() {
 
 // Initialize sitemap tab
 checkWebflowSitemap();
+
+// ============================================
+// Cache Warmup Tab
+// ============================================
+
+const warmupUrlInput = document.getElementById('warmupUrl');
+const warmupUrlCountDisplay = document.getElementById('warmupUrlCount');
+const startWarmupBtn = document.getElementById('startWarmup');
+const stopWarmupBtn = document.getElementById('stopWarmup');
+const warmupProgressSection = document.getElementById('warmupProgressSection');
+const warmupProgressFill = document.getElementById('warmupProgressFill');
+const warmupProgressText = document.getElementById('warmupProgressText');
+const warmupProgressLog = document.getElementById('warmupProgressLog');
+const warmupResultsSection = document.getElementById('warmupResultsSection');
+const warmupSummaryGrid = document.getElementById('warmupSummaryGrid');
+
+let warmupRunning = false;
+
+// Update warmup URL count from urls-main.txt
+async function updateWarmupUrlCount() {
+  try {
+    const response = await fetch('/api/urls');
+    const data = await response.json();
+    const count = data.content.split('\n')
+      .map(line => line.trim())
+      .filter(line => line && !line.startsWith('#')).length;
+    warmupUrlCountDisplay.textContent = `${count} URLs`;
+  } catch (error) {
+    warmupUrlCountDisplay.textContent = 'Error loading';
+  }
+}
+
+// Check existing warmup reports
+async function checkWarmupReports() {
+  try {
+    const response = await fetch('/api/warmup/reports');
+    const data = await response.json();
+
+    if (data.exists) {
+      displayWarmupResults(data.stats, data.timestamp);
+    }
+  } catch (error) {
+    console.error('Failed to check warmup reports:', error);
+  }
+}
+
+// Start warmup
+startWarmupBtn.addEventListener('click', async () => {
+  if (warmupRunning) return;
+
+  const baseUrl = warmupUrlInput.value.trim();
+  if (!baseUrl) {
+    alert('Please enter Target URL');
+    return;
+  }
+
+  warmupRunning = true;
+  startWarmupBtn.style.display = 'none';
+  stopWarmupBtn.style.display = 'inline-block';
+
+  warmupProgressSection.style.display = 'block';
+  warmupResultsSection.style.display = 'none';
+  warmupProgressLog.innerHTML = '';
+  warmupProgressFill.style.width = '0%';
+  warmupProgressText.textContent = '0%';
+
+  try {
+    const response = await fetch('/api/warmup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ baseUrl, socketId: socket.id })
+    });
+
+    const result = await response.json();
+    if (!result.success) {
+      throw new Error(result.error);
+    }
+  } catch (error) {
+    alert(`Error: ${error.message}`);
+    resetWarmupUI();
+  }
+});
+
+// Stop warmup
+stopWarmupBtn.addEventListener('click', async () => {
+  stopWarmupBtn.disabled = true;
+  stopWarmupBtn.textContent = 'Stopping...';
+
+  try {
+    await fetch('/api/warmup/stop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ socketId: socket.id })
+    });
+  } catch (error) {
+    console.error('Error stopping warmup:', error);
+  } finally {
+    stopWarmupBtn.disabled = false;
+    stopWarmupBtn.textContent = 'Stop Warmup';
+  }
+});
+
+// Handle warmup progress events
+socket.on('warmup-progress', (data) => {
+  handleWarmupProgress(data);
+});
+
+function handleWarmupProgress(data) {
+  const { type, current, total, url, status, duration, message, stats } = data;
+
+  switch (type) {
+    case 'start':
+      addWarmupLogEntry(message, 'info');
+      break;
+
+    case 'fetched':
+      const percentage = Math.round((current / total) * 100);
+      warmupProgressFill.style.width = `${percentage}%`;
+      warmupProgressText.textContent = `${percentage}%`;
+
+      const logClass = status === 200 ? 'success' : 'error';
+      addWarmupLogEntry(message, logClass);
+      break;
+
+    case 'generating':
+      warmupProgressFill.style.width = '100%';
+      warmupProgressText.textContent = '100%';
+      addWarmupLogEntry(message, 'info');
+      break;
+
+    case 'complete':
+      addWarmupLogEntry(message, 'success');
+      displayWarmupResults(stats);
+      resetWarmupUI();
+      break;
+
+    case 'stopped':
+      addWarmupLogEntry(message, 'warning');
+      resetWarmupUI();
+      break;
+
+    case 'error':
+      addWarmupLogEntry(`ERROR: ${message}`, 'error');
+      resetWarmupUI();
+      break;
+  }
+}
+
+function addWarmupLogEntry(message, type = 'info') {
+  const entry = document.createElement('div');
+  entry.className = `log-entry ${type}`;
+  const timestamp = new Date().toLocaleTimeString();
+  entry.textContent = `[${timestamp}] ${message}`;
+  warmupProgressLog.appendChild(entry);
+  warmupProgressLog.scrollTop = warmupProgressLog.scrollHeight;
+}
+
+function displayWarmupResults(stats, timestamp) {
+  warmupResultsSection.style.display = 'block';
+
+  const timeAgo = timestamp ? formatTimeAgo(timestamp) : 'Just now';
+  const totalTimeStr = stats.totalTime ? `${Math.round(stats.totalTime / 1000)}s` : 'N/A';
+
+  warmupSummaryGrid.innerHTML = `
+    <div class="summary-card success">
+      <h3>✅ Success (200)</h3>
+      <div class="value">${stats.success || 0}</div>
+      <small>Pages loaded</small>
+    </div>
+    <div class="summary-card error">
+      <h3>❌ Errors</h3>
+      <div class="value">${stats.errors || 0}</div>
+      <small>Failed requests</small>
+    </div>
+    <div class="summary-card warning">
+      <h3>⏱️ Avg Duration</h3>
+      <div class="value">${stats.avgDuration || 0}ms</div>
+      <small>Per page</small>
+    </div>
+    <div class="summary-card">
+      <h3>🕐 Total Time</h3>
+      <div class="value">${totalTimeStr}</div>
+      <small>${stats.total || 0} pages</small>
+    </div>
+    <div class="summary-card" style="grid-column: 1 / -1;">
+      <h3>🕐 Last Run</h3>
+      <div class="value" style="font-size: 1.2rem;">${timeAgo}</div>
+      <small>${timestamp ? new Date(timestamp).toLocaleString() : 'Just now'}</small>
+    </div>
+  `;
+}
+
+function resetWarmupUI() {
+  warmupRunning = false;
+  startWarmupBtn.style.display = 'inline-block';
+  stopWarmupBtn.style.display = 'none';
+}
+
+// Initialize warmup tab
+updateWarmupUrlCount();
+checkWarmupReports();

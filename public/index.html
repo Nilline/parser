@@ -17,6 +17,7 @@
     <div class="tabs">
       <button class="tab-btn active" data-tab="page-compare">📄 Page Compare</button>
       <button class="tab-btn" data-tab="sitemap-compare">🗺️ Sitemap Compare</button>
+      <button class="tab-btn" data-tab="cache-warmup">🔥 Cache Warmup</button>
     </div>
 
     <main>
@@ -167,6 +168,60 @@ Example:
           <div class="report-links">
             <a href="#" id="sitemapHtmlReportLink" class="btn-secondary" target="_blank">
               📄 View Detailed Report
+            </a>
+          </div>
+        </section>
+      </div>
+
+      <!-- Tab 3: Cache Warmup -->
+      <div id="tab-cache-warmup" class="tab-content">
+        <section class="config-section">
+          <h2>Cache Warmup</h2>
+          <p class="subtitle-small">Load all pages from the site to warm up CDN/Vercel cache. Useful after deployment.</p>
+
+          <div class="form-group">
+            <label for="warmupUrl">Target URL</label>
+            <input
+              type="text"
+              id="warmupUrl"
+              placeholder="https://www.coursebox.ai"
+              value="https://www.coursebox.ai"
+            >
+          </div>
+
+          <div class="warmup-info" id="warmupInfo">
+            <div class="info-card">
+              <span class="info-label">URLs to warm</span>
+              <span class="info-value" id="warmupUrlCount">Loading...</span>
+            </div>
+          </div>
+
+          <div class="button-group">
+            <button id="startWarmup" class="btn-primary">🔥 Start Warmup</button>
+            <button id="stopWarmup" class="btn-danger" style="display: none;">Stop Warmup</button>
+          </div>
+        </section>
+
+        <section class="progress-section" id="warmupProgressSection" style="display: none;">
+          <h2>Progress</h2>
+          <div class="progress-bar">
+            <div class="progress-fill" id="warmupProgressFill"></div>
+            <span class="progress-text" id="warmupProgressText">0%</span>
+          </div>
+          <div class="progress-log" id="warmupProgressLog"></div>
+        </section>
+
+        <section class="results-section" id="warmupResultsSection" style="display: none;">
+          <h2>Results</h2>
+
+          <div class="summary-grid" id="warmupSummaryGrid"></div>
+
+          <div class="report-links">
+            <a href="/result/warmup-report.html" id="warmupHtmlReportLink" class="btn-secondary" target="_blank">
+              📄 View HTML Report
+            </a>
+            <a href="/result/warmup-report.csv" id="warmupCsvReportLink" class="btn-secondary" download>
+              📊 Download CSV
             </a>
           </div>
         </section>
